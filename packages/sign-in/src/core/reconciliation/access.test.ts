@@ -22,6 +22,19 @@ async function aRemoval() {
 }
 
 describe('durable access removal and recovery', () => {
+  it('does not restore removed rights by retrying trusted setup', async () => {
+    // Given access removed from Maya's saved identity.
+    const given = await aRemoval();
+    await given.access.remove({ accountId: given.accountId, fleetId: null });
+
+    // When setup is retried rather than explicit account recovery.
+    const result = await createSetup({ identity: given.identity, fleet: fleetOfMaya(), secrets: aSetup().secrets }).establish(aSetup().input);
+
+    // Then setup refuses to restore access and the original mapping is retained.
+    expect(result).toEqual({ kind: 'pending', reason: 'accessRemoved' });
+    expect(await given.identity.transaction((records) => records.right({ accountId: given.accountId, fleetId: given.fleetId }))).toMatchObject({ scopes: [], isFleetManager: false });
+  });
+
   it('retries every target even while another target is unavailable', async () => {
     // Given core unavailable and gateway able to acknowledge removal.
     const given = await aRemoval();
