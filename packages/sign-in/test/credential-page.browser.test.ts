@@ -81,4 +81,50 @@ describe('approved credential screens', () => {
       await service.server.close();
     }
   }, 30_000);
+
+  it.each(['expired', 'another browser', 'no Origin'] as const)('shows the start-again state, never unavailable, for a flow from %s', async (refusal) => {
+    // Given Maya's credential page, a clock and a browser whose flow is refused.
+    const browser = await chromium.launch();
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    context.setDefaultTimeout(5000);
+    const identity = memoryIdentity();
+    const secrets = createSecrets();
+    const clock = { now: Date.now() };
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => clock.now, secrets, config: {
+      origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
+    } });
+    try {
+      await service.setup(aSetup().input);
+      await context.route(`${origin}/**`, async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        const { origin: sentOrigin, ...withoutOrigin } = await request.allHeaders();
+        const headers = refusal === 'no Origin' ? withoutOrigin : { ...withoutOrigin, ...(sentOrigin === undefined ? {} : { origin: sentOrigin }) };
+        const result = await service.server.inject({ method: z.enum(['GET', 'POST']).parse(request.method()), url: url.pathname + url.search, headers, ...(request.postData() === null ? {} : { payload: request.postData() ?? '' }) });
+        const replied = Object.fromEntries(Object.entries(result.headers).flatMap(([key, value]) => value === undefined ? [] : [[key, Array.isArray(value) ? value.join('\n') : String(value)]]));
+        await route.fulfill({ status: result.statusCode, headers: replied, body: result.body });
+      });
+      const page = await context.newPage();
+      const query = new URLSearchParams({ response_type: 'code', client_id: 'console', redirect_uri: redirectUri, state: 'browser-state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
+      await page.goto(`${origin}/oauth/authorize?${query.toString()}`);
+      if (refusal === 'expired') clock.now += 10 * 60 * 1000;
+      if (refusal === 'another browser') await context.clearCookies();
+
+      // When Maya submits her correct credential through the page's script.
+      await page.getByTestId('sign-in-email').fill('maya@example.test');
+      await page.getByTestId('sign-in-password').fill(aSetup().input.password);
+      await page.getByTestId('sign-in-submit').click();
+
+      // Then she is told to start again at the console, not that sign-in is unavailable.
+      await page.getByRole('heading', { name: 'We couldn’t sign you in' }).waitFor();
+      expect(await page.getByText('Your sign-in didn’t go through. Sign in again.').isVisible()).toBe(true);
+      expect(await page.getByRole('link', { name: 'Sign in again' }).getAttribute('href')).toBe('https://console.example.test/');
+      expect(await page.getByText('Sign-in is unavailable.').count()).toBe(0);
+    } finally {
+      await context.close();
+      await browser.close();
+      await service.server.close();
+    }
+  }, 30_000);
 });

@@ -17,13 +17,14 @@ const redirectUri = 'https://console.example.test/sign-in/done';
 const client = { id: 'console', secret: 'fixture-client-secret', redirectUri };
 const gatewayClient = { id: 'gateway', secret: 'fixture-gateway-secret', redirectUri: 'https://bridge.example.test/sign-in/done' };
 
-async function serviceOfMaya(shouldSetUp = true, trustedProxy?: string) {
+async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: string; now?: () => number } = {}) {
+  const { shouldSetUp = true, trustedProxy, now = () => Date.now() } = options;
   const identity = memoryIdentity();
   const fleet = fleetOfMaya(identity);
   const secrets = createSecrets();
   const { privateKey } = generateKeyPairSync('ed25519');
   const signer = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
-  const app = createService({ identity, fleet, secrets, signer, now: () => Date.now(), config: {
+  const app = createService({ identity, fleet, secrets, signer, now, config: {
     origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client, gatewayClient], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
   if (shouldSetUp) expect((await app.setup(aSetup().input)).kind).toBe('ready');
@@ -91,7 +92,7 @@ describe('first browser sign-in over the existing wire contract', () => {
 
   it.each([undefined, '127.0.0.1'])('counts addresses through configured trusted proxies only (%s)', async (trustedProxy) => {
     // Given one HTTPS proxy and the approved per-address limit.
-    const { app, secrets } = await serviceOfMaya(true, trustedProxy);
+    const { app, secrets } = await serviceOfMaya(trustedProxy === undefined ? {} : { trustedProxy });
     try {
       const query = new URLSearchParams({ response_type: 'code', client_id: client.id, redirect_uri: redirectUri, state: 'state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
       const started = await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
@@ -109,7 +110,7 @@ describe('first browser sign-in over the existing wire contract', () => {
 
   it('shows setup required to a public browser before trusted setup, without offering public signup', async () => {
     // Given a configured service whose trusted setup has not run.
-    const { app, secrets } = await serviceOfMaya(false);
+    const { app, secrets } = await serviceOfMaya({ shouldSetUp: false });
     try {
       // When the first public browser arrives.
       const query = new URLSearchParams({ response_type: 'code', client_id: client.id, redirect_uri: redirectUri, state: 'state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
@@ -166,6 +167,28 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(byGateway.statusCode).toBe(200);
       expect(byGatewayForm.json()).toEqual({ error: 'invalid_grant' });
       expect(byConsoleForm.statusCode).toBe(200);
+    } finally { await app.server.close(); }
+  });
+
+  it.each(['expired', 'another browser', 'no Origin'] as const)('shows the start-again page without script for a flow from %s', async (refusal) => {
+    // Given a credential page whose flow is then refused.
+    const clock = { now: Date.now() };
+    const { app, secrets } = await serviceOfMaya({ now: () => clock.now });
+    try {
+      const query = new URLSearchParams({ response_type: 'code', client_id: client.id, redirect_uri: redirectUri, state: 'browser-state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
+      const started = await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
+      const flow = /name="flow" value="([^"]+)"/.exec(started.body)?.[1] ?? '';
+      if (refusal === 'expired') clock.now += 10 * 60 * 1000;
+      const browser = refusal === 'another browser' ? 'aeolus_sign_in_browser=another-browser' : cookieOf(started, 'aeolus_sign_in_browser');
+
+      // When the form posts Maya's correct credential.
+      const result = await app.server.inject({ method: 'POST', url: '/sign-in', ...form({ flow, email: 'maya@example.test', password: aSetup().input.password }), headers: { ...form({}).headers, cookie: browser, ...(refusal === 'no Origin' ? {} : { origin }) } });
+
+      // Then the page starts again at the console that began the flow.
+      expect(result.statusCode).toBe(400);
+      expect(result.body).toContain('We couldn’t sign you in');
+      expect(result.body).toContain('Your sign-in didn’t go through. Sign in again.');
+      expect(result.body).toMatch(/<a [^>]*href="https:\/\/console\.example\.test\/"[^>]*>Sign in again<\/a>/);
     } finally { await app.server.close(); }
   });
 });
