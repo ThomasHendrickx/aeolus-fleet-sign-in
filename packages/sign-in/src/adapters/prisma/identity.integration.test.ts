@@ -137,3 +137,45 @@ describe('access cleanup durability', () => {
     expect(await database.identity.transaction((records) => records.right({ accountId, fleetId: setup.input.fleetId }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001' });
   });
 });
+
+
+describe('protected identity backup restore', () => {
+  it('restores the same identity and pending cleanup page before reconciling acknowledgements', async () => {
+    // Given a saved account, person mapping and partially completed cleanup in a protected database backup.
+    const setup = aSetup();
+    await createSetup({ identity: database.identity, fleet: fleetOfMaya(), secrets: setup.secrets }).establish(setup.input);
+    const accountId = setup.secrets.accountId();
+    const access = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve({ cursor: 'saved-page' }) } });
+    await access.remove({ accountId, fleetId: null });
+    await access.reconcile();
+    const dump = await container.exec(['pg_dump', '-U', container.getUsername(), '-d', container.getDatabase(), '-f', '/tmp/sign-in-backup.sql']);
+    expect(dump.exitCode).toBe(0);
+    const created = await container.exec(['createdb', '-U', container.getUsername(), 'restored']);
+    expect(created.exitCode).toBe(0);
+    const restored = await container.exec(['psql', '-U', container.getUsername(), '-d', 'restored', '-f', '/tmp/sign-in-backup.sql', '-v', 'ON_ERROR_STOP=1']);
+    expect(restored.exitCode).toBe(0);
+
+    // When that backup is restored on the matching installation and reconciliation restarts.
+    await database.close();
+    const restoredUrl = new URL(container.getConnectionUri());
+    restoredUrl.pathname = '/restored';
+    database = await openIdentity(restoredUrl.toString());
+    const target = await database.identity.transaction((records) => records.pendingCleanup(accountId));
+    // The partial page must not be acknowledged merely because it made progress.
+    expect(await database.identity.transaction(async (records) => {
+      const targets = [];
+      let held = await records.pendingCleanup(accountId);
+      while (held !== null) { targets.push(held); await records.deleteCleanup(held.id); held = await records.pendingCleanup(accountId); }
+      for (const saved of targets) await records.saveCleanup(saved);
+      return targets.some((saved) => saved.cursor === 'saved-page');
+    })).toBe(true);
+    expect(target).not.toBeNull();
+    const retry = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(true) } });
+    while ((await retry.reconcile()).kind === 'pending') { /* drain restored retry records */ }
+
+    // Then acknowledgement completes without changing the account, person ship or ownership mapping.
+    expect(await retry.hasPending()).toBe(false);
+    expect(await database.identity.transaction((records) => records.accountById(accountId))).toMatchObject({ id: accountId, organisationId: 'local', isDisabled: true });
+    expect(await database.identity.transaction((records) => records.right({ accountId, fleetId: setup.input.fleetId }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001' });
+  });
+});
