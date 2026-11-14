@@ -19,6 +19,7 @@ if (form instanceof HTMLFormElement) {
       const response = await fetch('/sign-in', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams(new FormData(form)) });
       const result = await response.json();
       if (result.kind === 'authorized') { window.location.assign(result.redirect); return; }
+      if (result.kind === 'startAgain') { window.location.assign(result.location); return; }
       feedback.replaceChildren();
       const notice = document.createElement('div');
       notice.className = `notice ${result.retryAt ? 'waiting' : ''}`;

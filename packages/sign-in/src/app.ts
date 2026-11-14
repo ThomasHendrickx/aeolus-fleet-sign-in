@@ -14,7 +14,7 @@ import type { createSecrets } from './adapters/crypto/secrets.js';
 import type { createSigner } from './adapters/crypto/signer.js';
 import { clientOf } from './adapters/http/client-authentication.js';
 import { tokenRequestOf } from './adapters/http/token-request.js';
-import { credentialPage, refusalPage, signInStyles } from './adapters/http/pages.js';
+import { credentialPage, refusalPage, signInStyles, startAgainPage } from './adapters/http/pages.js';
 
 const sharedCookie = 'aeolus_account_session';
 const browserCookie = 'aeolus_sign_in_browser';
@@ -24,6 +24,7 @@ const BODY_LIMIT_BYTES = 16_384;
 const REQUEST_TIMEOUT_MS = 15_000;
 const authorizeSchema = z.object({ response_type: z.literal('code'), client_id: z.string(), redirect_uri: z.url(), state: z.string().min(1).max(1024), code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code_challenge_method: z.literal('S256') });
 const credentialSchema = z.object({ flow: z.string().min(1).max(256), email: z.email().max(320), password: z.string().min(1).max(1024) });
+const startAgainSchema = z.object({ client: z.string().min(1).max(256).optional() });
 const revokeRequestSchema = z.object({ token: z.string().min(1).max(4096) });
 const script = await readFile(new URL('./adapters/http/assets/sign-in.js', import.meta.url), 'utf8');
 
@@ -40,7 +41,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
   });
   server.setErrorHandler((...args) => {
     const [, request, reply] = args;
-    const isForm = request.url === '/sign-in' && !request.headers.accept?.includes('application/json');
+    const isForm = request.url === '/sign-in' && !wantsJson(request);
     if (isForm) return reply.code(503).type('text/html').send(refusalPage({ heading: 'Can’t reach the sign-in service', text: 'Nothing changed in the fleet. Try again in a moment.' }));
     return reply.code(503).send({ error: 'temporarily_unavailable', message: 'Sign-in is unavailable. Try again in a moment.' });
   });
@@ -62,21 +63,35 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     if (authorized.kind === 'authorized') return reply.code(303).header('location', callbackOf(authorized)).send();
     return reply.type('text/html').send(credentialPage(authorized));
   });
+  /** The script follows the start-again location; a plain form post gets the page itself. */
+  function startAgain(input: { request: FastifyRequest; reply: FastifyReply; clientId: string | null }) {
+    input.reply.code(400);
+    if (wantsJson(input.request)) return { kind: 'startAgain', location: `/sign-in/start-again${input.clientId === null ? '' : `?${new URLSearchParams({ client: input.clientId }).toString()}`}` };
+    return input.reply.type('text/html').send(startAgainPage(restartOf(input.clientId)));
+  }
+  function restartOf(clientId: string | null): string {
+    const client = config.clients.find((candidate) => candidate.id === clientId);
+    return client === undefined ? '/' : new URL('/', client.redirectUri).toString();
+  }
+  server.get('/sign-in/start-again', async (request, reply) => {
+    const client = startAgainSchema.safeParse(request.query);
+    return reply.type('text/html').send(startAgainPage(restartOf(client.success ? client.data.client ?? null : null)));
+  });
   server.post('/sign-in', async (request, reply) => {
     const parsed = credentialSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).type('text/html').send(refusalPage({ heading: 'We couldn’t sign you in', text: 'Your sign-in didn’t go through. Sign in again.' }));
+    if (!parsed.success) return startAgain({ request, reply, clientId: null });
     const input = parsed.data;
     const submitted = await signIn.submitCredential({ ...input, browser: cookiesOf(request)[browserCookie] ?? null, isSameOrigin: request.headers.origin === config.origin, address: request.ip });
-    if (submitted.kind === 'startAgain') return reply.code(400).type('text/html').send(refusalPage({ heading: 'We couldn’t sign you in', text: 'Your sign-in didn’t go through. Sign in again.' }));
+    if (submitted.kind === 'startAgain') return startAgain({ request, reply, clientId: submitted.clientId });
     if (submitted.kind !== 'authorized') {
       const retryAt = submitted.kind === 'tooManyAttempts' ? submitted.retryAt : undefined;
       const message = retryAt === undefined ? 'Wrong email or password.' : `Too many attempts. Try again at ${new Date(retryAt).toISOString().slice(11, 16)} UTC. Sign-in is paused for 15 minutes.`;
       reply.code(retryAt === undefined ? 401 : 429);
       if (retryAt !== undefined) reply.header('retry-after', String(Math.ceil((retryAt - deps.now()) / 1000)));
-      return request.headers.accept?.includes('application/json') ? { kind: submitted.kind, message, retryAt } : reply.type('text/html').send(credentialPage({ flow: input.flow, email: input.email, message, ...(retryAt === undefined ? {} : { retryAt }) }));
+      return wantsJson(request) ? { kind: submitted.kind, message, retryAt } : reply.type('text/html').send(credentialPage({ flow: input.flow, email: input.email, message, ...(retryAt === undefined ? {} : { retryAt }) }));
     }
     reply.header('set-cookie', cookie({ name: sharedCookie, value: submitted.signIn, domain: config.cookieDomain, seconds: Math.max(0, Math.floor((submitted.expiresAt - deps.now()) / 1000)) }));
-    return request.headers.accept?.includes('application/json') ? { kind: 'authorized', redirect: callbackOf(submitted) } : reply.code(303).header('location', callbackOf(submitted)).send();
+    return wantsJson(request) ? { kind: 'authorized', redirect: callbackOf(submitted) } : reply.code(303).header('location', callbackOf(submitted)).send();
   });
   server.post('/oauth/token', async (request, reply) => {
     const authenticated = clientOf(request, config);
@@ -114,6 +129,10 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     return {};
   });
   return { server, setup, signIn };
+}
+
+function wantsJson(request: FastifyRequest): boolean {
+  return request.headers.accept?.includes('application/json') === true;
 }
 
 function headerOf(request: FastifyRequest, name: string): string {
