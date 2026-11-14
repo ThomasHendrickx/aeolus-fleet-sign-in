@@ -17,11 +17,11 @@ describe('first trusted setup', () => {
     const retry = await setup(aSetup().input);
 
     // Then the same opaque identity, person mapping and all offered scopes survive the retry.
-    expect(first).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_maya' });
+    expect(first).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' });
     expect(retry).toEqual(first);
     expect(identity.accounts.size).toBe(1);
-    expect(identity.rights.get('flt_workshop/maya-opaque-account')).toEqual({
-      fleetId: 'flt_workshop', accountId: 'maya-opaque-account', personShipId: 'shp_maya',
+    expect(identity.rights.get('flt_00000000000000000000000001/maya-opaque-account')).toEqual({
+      fleetId: 'flt_00000000000000000000000001', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001',
       scopes: ['messages:send', 'messages:receive', 'fleet:read', 'fleet:commission'],
       groupValues: ['fleet-manager'], isFleetManager: true,
     });
@@ -43,7 +43,7 @@ describe('first trusted setup', () => {
     const result = await restarted(aSetup().input);
 
     // Then the persisted id and installation commission key resolve the original person.
-    expect(result).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_maya' });
+    expect(result).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' });
     expect(identity.accounts.size).toBe(1);
     expect(fleet.people.size).toBe(1);
     expect([...fleet.people.keys()]).toEqual(['person-maya-opaque-account']);

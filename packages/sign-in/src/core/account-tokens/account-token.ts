@@ -1,21 +1,11 @@
 /** Issues fresh fleet claims only for a live shared sign-in with an existing grant. */
-import type { FleetId } from '@aeolus-fleet/common';
+import type { accountTokenClaimsSchema, FleetId } from '@aeolus-fleet/common';
+import type { z } from 'zod';
 
 import type { createSignIn } from '../sign-in/sign-in.js';
 import type { Identity, PersonFleets } from '../shared/identity.js';
 
-export interface FleetClaims {
-  readonly iss: string;
-  readonly aud: FleetId;
-  readonly sub: string;
-  readonly org: string;
-  readonly scope: string;
-  readonly group: readonly string[];
-  readonly person_ship?: string;
-  readonly argo: false;
-  readonly iat: number;
-  readonly exp: number;
-}
+export type FleetClaims = z.input<typeof accountTokenClaimsSchema>;
 
 export interface AccountTokenSigner {
   sign(claims: FleetClaims): Promise<string>;
@@ -37,7 +27,7 @@ export function createAccountToken(deps: { identity: Identity; fleet: PersonFlee
       const issuedAt = Math.floor(deps.now() / MILLISECONDS);
       const token = await deps.signer.sign({
         iss: deps.issuer, aud: input.fleetId, sub: account.id, org: account.organisationId,
-        scope: reconciled.scopes.join(' '), group: reconciled.groupValues,
+        scope: reconciled.scopes.join(' '), group: [...reconciled.groupValues],
         ...(reconciled.personShipId === null ? {} : { person_ship: reconciled.personShipId }),
         argo: false, iat: issuedAt, exp: issuedAt + TOKEN_SECONDS,
       });

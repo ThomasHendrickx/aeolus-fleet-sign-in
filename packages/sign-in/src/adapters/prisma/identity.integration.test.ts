@@ -14,7 +14,7 @@ beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:17-alpine').start();
   database = await openIdentity(container.getConnectionUri());
 }, 120_000);
-afterAll(async () => { await database?.close(); await container?.stop(); });
+afterAll(async () => { await database.close(); await container.stop(); }, 60_000);
 
 describe('durable identity across rollback concurrency and restart', () => {
   it('serializes simultaneous setup and persists the original person mapping through restart', async () => {
@@ -28,11 +28,11 @@ describe('durable identity across rollback concurrency and restart', () => {
     database = await openIdentity(container.getConnectionUri());
 
     // Then both found one account/person and the mapping remains durable.
-    expect(results).toEqual([{ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_maya' }, { kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_maya' }]);
+    expect(results).toEqual([{ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' }, { kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' }]);
     const account = await database.identity.transaction((records) => records.account('maya@example.test'));
     expect(account?.id).toBe('maya-opaque-account');
     expect(fleet.people.size).toBe(1);
-    expect(await database.identity.transaction((records) => records.right({ accountId: aSetup().secrets.accountId(), fleetId: 'flt_workshop' }))).toMatchObject({ personShipId: 'shp_maya', isFleetManager: true });
+    expect(await database.identity.transaction((records) => records.right({ accountId: aSetup().secrets.accountId(), fleetId: 'flt_00000000000000000000000001' }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001', isFleetManager: true });
   });
 
   it('rolls back partial identity changes and preserves code one-use and refusal counters after restart', async () => {

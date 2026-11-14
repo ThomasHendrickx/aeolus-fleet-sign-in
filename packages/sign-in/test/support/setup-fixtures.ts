@@ -6,7 +6,7 @@ import type { Identity, Secrets } from '../../src/core/shared/identity.js';
 
 export function aSetup(): { input: SetupInput; secrets: Secrets } {
   return {
-    input: { fleetId: 'flt_workshop', email: 'maya@example.test', displayName: 'Maya', password: 'private-password' },
+    input: { fleetId: 'flt_00000000000000000000000001', email: 'maya@example.test', displayName: 'Maya', password: 'private-password' },
     secrets: { accountId: () => accountIdSchema.parse('maya-opaque-account'), hashPassword: () => Promise.resolve('hash-of-private-password') },
   };
 }
@@ -19,7 +19,7 @@ export function fleetOfMaya(identity: Identity) {
       const account = await identity.transaction((records) => records.accountById(input.accountId));
       if (account === null) throw new Error('Account must already be durable');
       const key = `person-${input.accountId}`;
-      const personShipId = people.get(key) ?? 'shp_maya';
+      const personShipId = people.get(key) ?? 'shp_00000000000000000000000001';
       people.set(key, personShipId);
       if (fleet.shouldLoseConfirmation) throw new Error('Confirmation lost');
       return { ...input, personShipId, scopes: ['messages:send', 'messages:receive', 'fleet:read', 'fleet:commission'], groupValues: ['fleet-manager'], isFleetManager: true };
