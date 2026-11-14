@@ -67,7 +67,7 @@ const coreImpure = {
   /** @type {ImportRestriction[]} */
   imports: [
     { regex: '^(node:)?crypto$', message: cryptoMessage },
-    { regex: '^(node:)?(fs|fs/promises|http|https|http2|net|tls|dgram|dns)$', message: ioMessage },
+    { regex: '^(node:)?(fs|http|https|http2|net|tls|dgram|dns)(/.+)?$', message: ioMessage },
   ],
   /** @type {SyntaxRestriction[]} */
   syntax: [
