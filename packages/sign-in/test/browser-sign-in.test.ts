@@ -16,14 +16,14 @@ const origin = 'https://signin.example.test';
 const redirectUri = 'https://console.example.test/sign-in/done';
 const client = { id: 'console', secret: 'fixture-client-secret', redirectUri };
 
-async function serviceOfMaya(shouldSetUp = true) {
+async function serviceOfMaya(shouldSetUp = true, trustedProxy?: string) {
   const identity = memoryIdentity();
   const fleet = fleetOfMaya(identity);
   const secrets = createSecrets();
   const { privateKey } = generateKeyPairSync('ed25519');
   const signer = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
   const app = createService({ identity, fleet, secrets, signer, now: () => Date.now(), config: {
-    origin, cookieDomain: 'example.test', clients: [client], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
+    origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
   if (shouldSetUp) expect((await app.setup(aSetup().input)).kind).toBe('ready');
   return { app, secrets, signer, identity };
@@ -75,6 +75,24 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(signed.body).not.toContain(aSetup().input.password);
       const apps = await app.server.inject({ method: 'GET', url: '/api/apps', headers: { authorization: `Basic ${Buffer.from(`${client.id}:${client.secret}`).toString('base64')}`, 'aeolus-sign-in': shared } });
       expect(apps.json()).toMatchObject({ account: { email: 'maya@example.test', firstName: 'Maya' }, fleets: [{ id: aSetup().input.fleetId, name: 'workshop' }] });
+    } finally { await app.server.close(); }
+  });
+
+  it.each([undefined, '127.0.0.1'])('counts addresses through configured trusted proxies only (%s)', async (trustedProxy) => {
+    // Given one HTTPS proxy and the approved per-address limit.
+    const { app, secrets } = await serviceOfMaya(true, trustedProxy);
+    try {
+      const query = new URLSearchParams({ response_type: 'code', client_id: client.id, redirect_uri: redirectUri, state: 'state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
+      const started = await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
+      const flow = /name="flow" value="([^"]+)"/.exec(started.body)?.[1] ?? '';
+      const browser = cookieOf(started, 'aeolus_sign_in_browser');
+      for (let index = 0; index < 20; index += 1) await app.server.inject({ method: 'POST', url: '/sign-in', remoteAddress: '127.0.0.1', ...form({ flow, email: `unknown-${index}@example.test`, password: 'wrong' }), headers: { ...form({}).headers, cookie: browser, origin, 'x-forwarded-for': '203.0.113.1' } });
+
+      // When another forwarded address presents Maya's correct credential.
+      const result = await app.server.inject({ method: 'POST', url: '/sign-in', remoteAddress: '127.0.0.1', ...form({ flow, email: 'maya@example.test', password: aSetup().input.password }), headers: { ...form({}).headers, cookie: browser, origin, 'x-forwarded-for': '203.0.113.2' } });
+
+      // Then only an explicitly trusted proxy may supply that different address.
+      expect(result.statusCode).toBe(trustedProxy === undefined ? 429 : 303);
     } finally { await app.server.close(); }
   });
 
