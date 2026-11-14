@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { createService } from '../src/app.js';
 import { createSecrets } from '../src/adapters/crypto/secrets.js';
 import { createSigner } from '../src/adapters/crypto/signer.js';
+import { approvedNotice, noticeIn } from './support/approved-mockups.js';
 import { aSetup, fleetOfMaya } from './support/setup-fixtures.js';
 import { memoryIdentity } from './support/memory-identity.js';
 
@@ -121,6 +122,52 @@ describe('approved credential screens', () => {
       expect(await page.getByText('Your sign-in didn’t go through. Sign in again.').isVisible()).toBe(true);
       expect(await page.getByRole('link', { name: 'Sign in again' }).getAttribute('href')).toBe('https://console.example.test/');
       expect(await page.getByText('Sign-in is unavailable.').count()).toBe(0);
+    } finally {
+      await context.close();
+      await browser.close();
+      await service.server.close();
+    }
+  }, 30_000);
+
+  it.each([['04-wrong-credential', 1], ['05-too-many-attempts', 5], ['23-credential-unavailable', 1]] as const)('shows the approved %s notice through the page script', async (scene, submissions) => {
+    // Given Maya's credential page at server time 14:30, with credential processing that fails in scene 23.
+    const browser = await chromium.launch();
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    context.setDefaultTimeout(5000);
+    const identity = memoryIdentity();
+    const secrets = createSecrets();
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const isUnavailable = scene === '23-credential-unavailable';
+    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => Date.UTC(2026, 10, 14, 14, 30), secrets: { ...secrets, verifyPassword: (input) => isUnavailable ? Promise.reject(new Error('Credential processing failed')) : secrets.verifyPassword(input) }, config: {
+      origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
+    } });
+    try {
+      await service.setup(aSetup().input);
+      await context.route(`${origin}/**`, async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        const result = await service.server.inject({ method: z.enum(['GET', 'POST']).parse(request.method()), url: url.pathname + url.search, headers: await request.allHeaders(), ...(request.postData() === null ? {} : { payload: request.postData() ?? '' }) });
+        const headers = Object.fromEntries(Object.entries(result.headers).flatMap(([key, value]) => value === undefined ? [] : [[key, Array.isArray(value) ? value.join('\n') : String(value)]]));
+        await route.fulfill({ status: result.statusCode, headers, body: result.body });
+      });
+      const page = await context.newPage();
+      const query = new URLSearchParams({ response_type: 'code', client_id: 'console', redirect_uri: redirectUri, state: 'browser-state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
+      await page.goto(`${origin}/oauth/authorize?${query.toString()}`);
+
+      // When Maya submits a wrong password, five times for the pause.
+      await page.getByTestId('sign-in-email').fill('maya@example.test');
+      await page.getByTestId('sign-in-password').fill('wrong');
+      for (let count = 0; count < submissions; count += 1) {
+        await page.getByRole('button', { name: 'Sign in' }).click();
+        await page.getByRole('button', { name: 'Sign in' }).waitFor();
+      }
+
+      // Then the notice is the approved one, and the paused button looks disabled.
+      expect(noticeIn(await page.locator('[data-feedback]').innerHTML())).toBe(approvedNotice(scene));
+      if (scene === '05-too-many-attempts') {
+        expect(await page.getByTestId('sign-in-submit').isDisabled()).toBe(true);
+        expect(await page.getByTestId('sign-in-submit').evaluate((button) => getComputedStyle(button).opacity)).toBe('0.45');
+      }
     } finally {
       await context.close();
       await browser.close();

@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { createService } from '../src/app.js';
 import { createSecrets } from '../src/adapters/crypto/secrets.js';
 import { createSigner } from '../src/adapters/crypto/signer.js';
+import { approvedNotice, noticeIn } from './support/approved-mockups.js';
 import { aSetup, fleetOfMaya } from './support/setup-fixtures.js';
 import { memoryIdentity } from './support/memory-identity.js';
 
@@ -17,11 +18,12 @@ const redirectUri = 'https://console.example.test/sign-in/done';
 const client = { id: 'console', secret: 'fixture-client-secret', redirectUri };
 const gatewayClient = { id: 'gateway', secret: 'fixture-gateway-secret', redirectUri: 'https://bridge.example.test/sign-in/done' };
 
-async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: string; now?: () => number } = {}) {
-  const { shouldSetUp = true, trustedProxy, now = () => Date.now() } = options;
+async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: string; now?: () => number; isUnavailable?: () => boolean } = {}) {
+  const { shouldSetUp = true, trustedProxy, now = () => Date.now(), isUnavailable = () => false } = options;
   const identity = memoryIdentity();
   const fleet = fleetOfMaya(identity);
-  const secrets = createSecrets();
+  const real = createSecrets();
+  const secrets = { ...real, verifyPassword: (input: { password: string; hash: string | null }) => isUnavailable() ? Promise.reject(new Error('Credential processing failed')) : real.verifyPassword(input) };
   const { privateKey } = generateKeyPairSync('ed25519');
   const signer = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
   const app = createService({ identity, fleet, secrets, signer, now, config: {
@@ -190,5 +192,82 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(result.body).toContain('Your sign-in didn’t go through. Sign in again.');
       expect(result.body).toMatch(/<a [^>]*href="https:\/\/console\.example\.test\/"[^>]*>Sign in again<\/a>/);
     } finally { await app.server.close(); }
+  });
+  describe('approved credential refusals without script', () => {
+    async function credentialPageOf(app: Awaited<ReturnType<typeof serviceOfMaya>>['app'], challenge: string) {
+      const query = new URLSearchParams({ response_type: 'code', client_id: client.id, redirect_uri: redirectUri, state: 'browser-state', code_challenge: challenge, code_challenge_method: 'S256' });
+      const started = await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
+      const flow = /name="flow" value="([^"]+)"/.exec(started.body)?.[1] ?? '';
+      const browser = cookieOf(started, 'aeolus_sign_in_browser');
+      return (password: string) => app.server.inject({ method: 'POST', url: '/sign-in', ...form({ flow, email: 'maya@example.test', password }), headers: { ...form({}).headers, cookie: browser, origin } });
+    }
+
+    it('shows scene 04, the wrong-credential notice with its alert icon', async () => {
+      // Given Maya's credential page.
+      const { app, secrets } = await serviceOfMaya();
+      try {
+        const submit = await credentialPageOf(app, await secrets.digest('verifier'));
+
+        // When she submits a wrong password.
+        const refused = await submit('wrong');
+
+        // Then the page shows the approved notice.
+        expect(refused.statusCode).toBe(401);
+        expect(noticeIn(refused.body)).toBe(approvedNotice('04-wrong-credential'));
+      } finally { await app.server.close(); }
+    });
+
+    it('shows scene 05, the paused notice with its timer icon and a disabled-looking button', async () => {
+      // Given server time 14:30 and four failed attempts on Maya's account.
+      const { app, secrets } = await serviceOfMaya({ now: () => Date.UTC(2026, 10, 14, 14, 30) });
+      try {
+        const submit = await credentialPageOf(app, await secrets.digest('verifier'));
+        for (let count = 0; count < 4; count += 1) await submit('wrong');
+
+        // When the fifth failure reaches the limit.
+        const paused = await submit('wrong');
+
+        // Then the page shows the approved two-line notice and a disabled button in the approved disabled style.
+        expect(paused.statusCode).toBe(429);
+        expect(noticeIn(paused.body)).toBe(approvedNotice('05-too-many-attempts'));
+        expect(paused.body).toMatch(/<button [^>]*data-testid="sign-in-submit"[^>]*\bdata-disabled=""[^>]*\bdisabled[^>]*>/);
+        expect(paused.body).toContain('data-disabled:not-data-loading:opacity-45');
+      } finally { await app.server.close(); }
+    });
+
+    it('shows scene 23, the credential form with the two-line unavailable notice', async () => {
+      // Given Maya's credential page and credential processing that then fails.
+      const state = { isUnavailable: false };
+      const { app, secrets } = await serviceOfMaya({ isUnavailable: () => state.isUnavailable });
+      try {
+        const submit = await credentialPageOf(app, await secrets.digest('verifier'));
+        state.isUnavailable = true;
+
+        // When she submits her credential.
+        const unavailable = await submit(aSetup().input.password);
+
+        // Then she keeps the form and her email, with the approved notice, not another page.
+        expect(unavailable.statusCode).toBe(503);
+        expect(noticeIn(unavailable.body)).toBe(approvedNotice('23-credential-unavailable'));
+        expect(unavailable.body).toContain('data-testid="sign-in-form"');
+        expect(unavailable.body).toContain('value="maya@example.test"');
+      } finally { await app.server.close(); }
+    });
+
+    it('shows scene 11 with its Try again button back to the same sign-in', async () => {
+      // Given a service whose trusted setup has not run.
+      const { app, secrets } = await serviceOfMaya({ shouldSetUp: false });
+      try {
+        const url = `/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: client.id, redirect_uri: redirectUri, state: 'state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' }).toString()}`;
+
+        // When a browser arrives.
+        const result = await app.server.inject({ method: 'GET', url });
+
+        // Then the approved refusal offers Try again on the same request.
+        expect(result.body).toContain('Sign-in is not ready');
+        const tryAgain = /<a [^>]*href="([^"]+)"[^>]*>Try again<\/a>/.exec(result.body)?.[1];
+        expect(tryAgain?.replaceAll('&amp;', '&')).toBe(url);
+      } finally { await app.server.close(); }
+    });
   });
 });
