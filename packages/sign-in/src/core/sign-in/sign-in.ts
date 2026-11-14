@@ -1,7 +1,8 @@
 /** Durable browser-bound authorization and fixed-lifetime shared sign-ins. */
 import type { Authorization, FailedAttempts, Identity, IdentityRecords, SignInSecrets } from '../shared/identity.js';
 
-const ATTEMPT_WINDOW = 15 * 60 * 1000;
+/** Failures count within this window, and reaching a limit refuses attempts for as long. */
+export const ATTEMPT_WINDOW = 15 * 60 * 1000;
 const ACCOUNT_FAILURES = 5;
 const ADDRESS_FAILURES = 20;
 const SHARED_SIGN_IN_LIFE = 12 * 60 * 60 * 1000;
@@ -11,13 +12,25 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
   const digest = (value: string) => deps.secrets.digest(value);
   const transaction = deps.identity.transaction.bind(deps.identity);
 
+  async function openFlow(records: IdentityRecords, input: { flowHash: string; browser: string }) {
+    const flow = await records.authorization(input.flowHash);
+    return flow !== null && flow.expiresAt > deps.now() && flow.browser === await digest(input.browser) ? flow : null;
+  }
+
+  /** An expired, other-browser or refused flow starts again at the client that began it, when known. */
+  async function startAgain(flow: string) {
+    const flowHash = await digest(flow);
+    const held = await transaction((records) => records.authorization(flowHash));
+    return { kind: 'startAgain' as const, clientId: held?.clientId ?? null };
+  }
+
   async function accountIn(records: IdentityRecords, hash: string) {
     const held = await records.sharedSignIn(hash);
     if (held === null || held.expiresAt <= deps.now()) return null;
     return records.accountById(held.accountId);
   }
 
-  return {
+  const steps = {
     async authenticate(input: { email: string; password: string; address: string }) {
       const accountKey = `account:${await digest(input.email)}`;
       const addressKey = `address:${await digest(input.address)}`;
@@ -56,16 +69,14 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       return { flow };
     },
     async inspect(input: { flow: string; browser: string }) {
-      return transaction(async (records) => {
-        const flow = await records.authorization(await digest(input.flow));
-        return flow !== null && flow.expiresAt > deps.now() && flow.browser === await digest(input.browser);
-      });
+      const flowHash = await digest(input.flow);
+      return transaction(async (records) => await openFlow(records, { flowHash, browser: input.browser }) !== null);
     },
     async complete(input: { flow: string; browser: string; signIn: string }) {
       const flowHash = await digest(input.flow);
       return transaction(async (records) => {
-        const flow = await records.authorization(flowHash);
-        if (flow === null || flow.expiresAt <= deps.now() || flow.browser !== await digest(input.browser)) return { kind: 'invalidFlow' as const };
+        const flow = await openFlow(records, { flowHash, browser: input.browser });
+        if (flow === null) return { kind: 'invalidFlow' as const };
         const signInHash = await digest(input.signIn);
         if (await accountIn(records, signInHash) === null) return { kind: 'signedOut' as const };
         const code = deps.secrets.token();
@@ -86,6 +97,29 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
     },
     async revoke(signIn: string) {
       return transaction(async (records) => records.deleteSharedSignIn(await digest(signIn)));
+    },
+  };
+
+  return {
+    ...steps,
+    /** A browser arrives from a registered client: setup comes first, then a live shared sign-in skips the credential form. */
+    async authorize(input: Omit<Authorization, 'expiresAt'> & { signIn: string | null }) {
+      if (!await transaction((records) => records.hasAccounts())) return { kind: 'setupRequired' as const };
+      const { flow } = await steps.begin(input);
+      if (input.signIn !== null) {
+        const completed = await steps.complete({ flow, browser: input.browser, signIn: input.signIn });
+        if (completed.kind === 'authorized') return completed;
+      }
+      return { kind: 'credentialNeeded' as const, flow };
+    },
+    /** The credential form completes only its own open flow, from the browser and origin that began it. */
+    async submitCredential(input: { flow: string; browser: string | null; isSameOrigin: boolean; email: string; password: string; address: string }) {
+      if (!input.isSameOrigin || input.browser === null || !await steps.inspect({ flow: input.flow, browser: input.browser })) return startAgain(input.flow);
+      const authenticated = await steps.authenticate(input);
+      if (authenticated.kind !== 'authenticated') return authenticated;
+      const completed = await steps.complete({ flow: input.flow, browser: input.browser, signIn: authenticated.signIn });
+      if (completed.kind !== 'authorized') return startAgain(input.flow);
+      return { ...completed, signIn: authenticated.signIn, expiresAt: authenticated.expiresAt };
     },
   };
 }

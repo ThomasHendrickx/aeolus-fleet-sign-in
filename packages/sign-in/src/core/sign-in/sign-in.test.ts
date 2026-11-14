@@ -103,4 +103,35 @@ describe('Maya signs in to her local account', () => {
     // Then neither client can use it again.
     expect(await fixture.signIn.account(authenticated.signIn)).toEqual({ kind: 'signedOut' });
   });
+
+  it('skips the credential form for a live shared sign-in and asks for credentials otherwise', async () => {
+    // Given Maya's live shared sign-in.
+    const fixture = await signInOfMaya();
+    const authenticated = await fixture.authenticate();
+
+    // When a registered client sends her browser with and without that shared sign-in.
+    const returning = await fixture.signIn.authorize({ ...request, signIn: authenticated.signIn });
+    const fresh = await fixture.signIn.authorize({ ...request, signIn: null });
+
+    // Then the returning browser goes straight back with a code, and the fresh one gets the credential form.
+    expect(returning).toMatchObject({ kind: 'authorized', redirectUri: request.redirectUri, state: request.state });
+    expect(fresh.kind).toBe('credentialNeeded');
+  });
+
+  it('completes a credential submission only from the browser and origin that began the flow', async () => {
+    // Given an open flow in Maya's browser.
+    const fixture = await signInOfMaya();
+    const { flow } = await fixture.signIn.begin(request);
+    const credential = { flow, email: 'maya@example.test', password: 'private-password', address: 'trusted-address' };
+
+    // When it is submitted from another origin, another browser, then the right ones.
+    const crossOrigin = await fixture.signIn.submitCredential({ ...credential, browser: request.browser, isSameOrigin: false });
+    const otherBrowser = await fixture.signIn.submitCredential({ ...credential, browser: 'another-browser', isSameOrigin: true });
+    const completed = await fixture.signIn.submitCredential({ ...credential, browser: request.browser, isSameOrigin: true });
+
+    // Then only the initiating browser on the sign-in origin gets a code; the others start again at the console.
+    expect(crossOrigin).toEqual({ kind: 'startAgain', clientId: 'console' });
+    expect(otherBrowser).toEqual({ kind: 'startAgain', clientId: 'console' });
+    expect(completed).toMatchObject({ kind: 'authorized', redirectUri: request.redirectUri, state: request.state, expiresAt: 43_200_000 });
+  });
 });

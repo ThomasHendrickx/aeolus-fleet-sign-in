@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
+import { createOpenableFleets } from './core/accounts/openable-fleets.js';
 import { createSetup } from './core/accounts/setup.js';
 import { createAccountToken } from './core/account-tokens/account-token.js';
 import { createSignIn } from './core/sign-in/sign-in.js';
@@ -32,6 +33,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
   const signIn = createSignIn(deps);
   const token = createAccountToken({ ...deps, issuer: config.origin, signIn });
   const setup = createSetup(deps);
+  const openableFleets = createOpenableFleets({ identity: deps.identity, signIn });
   server.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request: FastifyRequest, body: string) => Promise.resolve(Object.fromEntries(new URLSearchParams(body))));
   server.addHook('onSend', async (_request, reply) => {
     reply.header('cache-control', 'no-store').header('referrer-policy', 'no-referrer').header('x-content-type-options', 'nosniff').header('content-security-policy', "default-src 'none'; style-src 'self'; script-src 'self'; font-src data:; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
@@ -53,34 +55,28 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     const input = parsed.data;
     const client = config.clients.find((candidate) => candidate.id === input.client_id && candidate.redirectUri === input.redirect_uri);
     if (client === undefined) return invalidConfiguration(reply);
-    if (!await deps.identity.transaction((records) => records.hasAccounts())) return reply.code(503).type('text/html').send(refusalPage({ heading: 'Sign-in is not ready', text: 'The person who runs this installation must finish setup on the server before you can sign in.' }));
     const browser = cookiesOf(request)[browserCookie] ?? deps.secrets.token();
+    const authorized = await signIn.authorize({ clientId: client.id, redirectUri: client.redirectUri, state: input.state, codeChallenge: input.code_challenge, browser, signIn: cookiesOf(request)[sharedCookie] ?? null });
+    if (authorized.kind === 'setupRequired') return reply.code(503).type('text/html').send(refusalPage({ heading: 'Sign-in is not ready', text: 'The person who runs this installation must finish setup on the server before you can sign in.' }));
     reply.header('set-cookie', cookie({ name: browserCookie, value: browser, seconds: BROWSER_BINDING_SECONDS }));
-    const flow = await signIn.begin({ clientId: client.id, redirectUri: client.redirectUri, state: input.state, codeChallenge: input.code_challenge, browser });
-    const shared = cookiesOf(request)[sharedCookie];
-    if (shared !== undefined) {
-      const completed = await signIn.complete({ ...flow, browser, signIn: shared });
-      if (completed.kind === 'authorized') return reply.code(303).header('location', callbackOf(completed)).send();
-    }
-    return reply.type('text/html').send(credentialPage(flow));
+    if (authorized.kind === 'authorized') return reply.code(303).header('location', callbackOf(authorized)).send();
+    return reply.type('text/html').send(credentialPage(authorized));
   });
   server.post('/sign-in', async (request, reply) => {
     const parsed = credentialSchema.safeParse(request.body);
-    const browser = cookiesOf(request)[browserCookie];
-    if (!parsed.success || browser === undefined || request.headers.origin !== config.origin || !await signIn.inspect({ flow: parsed.data.flow, browser })) return reply.code(400).type('text/html').send(refusalPage({ heading: 'We couldn’t sign you in', text: 'Your sign-in didn’t go through. Sign in again.' }));
+    if (!parsed.success) return reply.code(400).type('text/html').send(refusalPage({ heading: 'We couldn’t sign you in', text: 'Your sign-in didn’t go through. Sign in again.' }));
     const input = parsed.data;
-    const authenticated = await signIn.authenticate({ email: input.email, password: input.password, address: request.ip });
-    if (authenticated.kind !== 'authenticated') {
-      const retryAt = authenticated.kind === 'tooManyAttempts' ? authenticated.retryAt : undefined;
+    const submitted = await signIn.submitCredential({ ...input, browser: cookiesOf(request)[browserCookie] ?? null, isSameOrigin: request.headers.origin === config.origin, address: request.ip });
+    if (submitted.kind === 'startAgain') return reply.code(400).type('text/html').send(refusalPage({ heading: 'We couldn’t sign you in', text: 'Your sign-in didn’t go through. Sign in again.' }));
+    if (submitted.kind !== 'authorized') {
+      const retryAt = submitted.kind === 'tooManyAttempts' ? submitted.retryAt : undefined;
       const message = retryAt === undefined ? 'Wrong email or password.' : `Too many attempts. Try again at ${new Date(retryAt).toISOString().slice(11, 16)} UTC. Sign-in is paused for 15 minutes.`;
       reply.code(retryAt === undefined ? 401 : 429);
       if (retryAt !== undefined) reply.header('retry-after', String(Math.ceil((retryAt - deps.now()) / 1000)));
-      return request.headers.accept?.includes('application/json') ? { kind: authenticated.kind, message, retryAt } : reply.type('text/html').send(credentialPage({ flow: input.flow, email: input.email, message, ...(retryAt === undefined ? {} : { retryAt }) }));
+      return request.headers.accept?.includes('application/json') ? { kind: submitted.kind, message, retryAt } : reply.type('text/html').send(credentialPage({ flow: input.flow, email: input.email, message, ...(retryAt === undefined ? {} : { retryAt }) }));
     }
-    const completed = await signIn.complete({ flow: input.flow, browser, signIn: authenticated.signIn });
-    if (completed.kind !== 'authorized') return reply.code(400).send({ error: 'invalid_grant' });
-    reply.header('set-cookie', cookie({ name: sharedCookie, value: authenticated.signIn, domain: config.cookieDomain, seconds: Math.max(0, Math.floor((authenticated.expiresAt - deps.now()) / 1000)) }));
-    return request.headers.accept?.includes('application/json') ? { kind: 'authorized', redirect: callbackOf(completed) } : reply.code(303).header('location', callbackOf(completed)).send();
+    reply.header('set-cookie', cookie({ name: sharedCookie, value: submitted.signIn, domain: config.cookieDomain, seconds: Math.max(0, Math.floor((submitted.expiresAt - deps.now()) / 1000)) }));
+    return request.headers.accept?.includes('application/json') ? { kind: 'authorized', redirect: callbackOf(submitted) } : reply.code(303).header('location', callbackOf(submitted)).send();
   });
   server.post('/oauth/token', async (request, reply) => {
     const authenticated = clientOf(request, config);
@@ -105,10 +101,10 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
   });
   server.get('/api/apps', async (request, reply) => {
     if (clientOf(request, config) === null) return reply.code(401).send({ error: 'invalid_client' });
-    const shared = await signIn.account(headerOf(request, 'aeolus-sign-in'));
-    if (shared.kind === 'signedOut') return reply.code(401).send({ error: 'invalid_grant' });
-    const rights = await deps.identity.transaction((records) => Promise.all(config.fleets.map(async (fleet) => ({ fleet, right: await records.right({ accountId: shared.account.id, fleetId: fleet.id }) }))));
-    return { account: { id: shared.account.id, email: shared.account.email, firstName: shared.account.displayName }, apps: [], fleets: rights.filter(({ right }) => right !== null && right.scopes.length > 0).map(({ fleet }) => ({ id: fleet.id, name: fleet.name, argo: false, apps: [{ app: 'console', url: fleet.consoleUrl }, { app: 'gateway', url: fleet.gatewayUrl }] })) };
+    const openable = await openableFleets({ signIn: headerOf(request, 'aeolus-sign-in'), fleetIds: config.fleets.map((fleet) => fleet.id) });
+    if (openable.kind === 'signedOut') return reply.code(401).send({ error: 'invalid_grant' });
+    const { account } = openable;
+    return { account: { id: account.id, email: account.email, firstName: account.displayName }, apps: [], fleets: config.fleets.filter((fleet) => openable.fleetIds.includes(fleet.id)).map((fleet) => ({ id: fleet.id, name: fleet.name, argo: false, apps: [{ app: 'console', url: fleet.consoleUrl }, { app: 'gateway', url: fleet.gatewayUrl }] })) };
   });
   server.post('/oauth/revoke', async (request, reply) => {
     if (clientOf(request, config) === null) return reply.code(401).send({ error: 'invalid_client' });
