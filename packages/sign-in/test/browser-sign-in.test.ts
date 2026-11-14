@@ -15,6 +15,7 @@ import { memoryIdentity } from './support/memory-identity.js';
 const origin = 'https://signin.example.test';
 const redirectUri = 'https://console.example.test/sign-in/done';
 const client = { id: 'console', secret: 'fixture-client-secret', redirectUri };
+const gatewayClient = { id: 'gateway', secret: 'fixture-gateway-secret', redirectUri: 'https://bridge.example.test/sign-in/done' };
 
 async function serviceOfMaya(shouldSetUp = true, trustedProxy?: string) {
   const identity = memoryIdentity();
@@ -23,13 +24,23 @@ async function serviceOfMaya(shouldSetUp = true, trustedProxy?: string) {
   const { privateKey } = generateKeyPairSync('ed25519');
   const signer = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
   const app = createService({ identity, fleet, secrets, signer, now: () => Date.now(), config: {
-    origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
+    origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client, gatewayClient], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
   if (shouldSetUp) expect((await app.setup(aSetup().input)).kind).toBe('ready');
   return { app, secrets, signer, identity };
 }
 
 function form(fields: Record<string, string>) { return { headers: { 'content-type': 'application/x-www-form-urlencoded' }, payload: new URLSearchParams(fields).toString() }; }
+
+function basicOf(registered: { id: string; secret: string }) { return `Basic ${Buffer.from(`${registered.id}:${registered.secret}`).toString('base64')}`; }
+
+async function codeFor(app: Awaited<ReturnType<typeof serviceOfMaya>>['app'], input: { registered: { id: string; redirectUri: string }; challenge: string }) {
+  const query = new URLSearchParams({ response_type: 'code', client_id: input.registered.id, redirect_uri: input.registered.redirectUri, state: 'browser-state', code_challenge: input.challenge, code_challenge_method: 'S256' });
+  const started = await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
+  const flow = /name="flow" value="([^"]+)"/.exec(started.body)?.[1] ?? '';
+  const signed = await app.server.inject({ method: 'POST', url: '/sign-in', ...form({ flow, email: 'maya@example.test', password: aSetup().input.password }), headers: { ...form({}).headers, cookie: cookieOf(started, 'aeolus_sign_in_browser'), origin } });
+  return new URL(String(signed.headers.location)).searchParams.get('code') ?? '';
+}
 
 function cookieOf(response: { headers: Record<string, unknown> }, name: string) {
   const header = response.headers['set-cookie'];
@@ -133,6 +144,28 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(invalidClient.json()).toEqual({ error: 'invalid_client' });
       expect((await app.server.inject({ method: 'POST', url: '/sign-in', ...form({ email: 'maya@example.test', password: aSetup().input.password }) })).statusCode).toBe(400);
       expect(other.body + invalidClient.body).not.toContain('passwordHash');
+    } finally { await app.server.close(); }
+  });
+
+  it('redeems a code only for the client that authenticated, by Basic or form credentials', async () => {
+    // Given a code issued to the gateway client and the gateway's verifier.
+    const { app, secrets } = await serviceOfMaya();
+    try {
+      const challenge = await secrets.digest('gateway-verifier');
+      const codes = { gateway: [await codeFor(app, { registered: gatewayClient, challenge }), await codeFor(app, { registered: gatewayClient, challenge })], console: [await codeFor(app, { registered: client, challenge }), await codeFor(app, { registered: client, challenge })] };
+      const redemption = (code: string, registered: { redirectUri: string }) => ({ grant_type: 'authorization_code', code, redirect_uri: registered.redirectUri, code_verifier: 'gateway-verifier' });
+
+      // When another client presents each code, then its owner does: by Basic without client_id, and by form credentials.
+      const byConsole = await app.server.inject({ method: 'POST', url: '/oauth/token', ...form({ ...redemption(codes.gateway[0] ?? '', gatewayClient), client_id: gatewayClient.id }), headers: { ...form({}).headers, authorization: basicOf(client) } });
+      const byGateway = await app.server.inject({ method: 'POST', url: '/oauth/token', ...form(redemption(codes.gateway[1] ?? '', gatewayClient)), headers: { ...form({}).headers, authorization: basicOf(gatewayClient) } });
+      const byGatewayForm = await app.server.inject({ method: 'POST', url: '/oauth/token', ...form({ ...redemption(codes.console[0] ?? '', client), client_id: gatewayClient.id, client_secret: gatewayClient.secret }) });
+      const byConsoleForm = await app.server.inject({ method: 'POST', url: '/oauth/token', ...form({ ...redemption(codes.console[1] ?? '', client), client_id: client.id, client_secret: client.secret }) });
+
+      // Then only the authenticated owner of each code redeems it.
+      expect(byConsole.json()).toEqual({ error: 'invalid_grant' });
+      expect(byGateway.statusCode).toBe(200);
+      expect(byGatewayForm.json()).toEqual({ error: 'invalid_grant' });
+      expect(byConsoleForm.statusCode).toBe(200);
     } finally { await app.server.close(); }
   });
 });
