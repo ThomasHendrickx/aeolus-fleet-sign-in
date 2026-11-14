@@ -74,7 +74,7 @@ describe('the released core person lifecycle', () => {
       const agentToken = registerOutputSchema.parse(await post('/api/v1/ship/register', { shipId: agent.shipId, secret: agent.secret, location: { kind: 'SERVER' } })).crewToken;
 
       // When durable removal reconciles a bounded page, then resumes at its saved cursor.
-      const cleanup = createCoreCleanup({ url, installationToken: token });
+      const cleanup = createCoreCleanup({ url, installationToken: token, log: () => undefined });
       const target = { id: cleanupTargetIdSchema.parse('removal'), attempts: 0, cursor: null, ...input, personShipId: first.personShipId, shouldReleaseOwnedTrierarchs: true };
       expect(await cleanup.acknowledge({ ...target, kind: 'fleet', personShipId: null })).toEqual(personShipFound(first.personShipId));
       expect(await cleanup.acknowledge({ ...target, kind: 'cutOff', fleetId: null })).toEqual(acknowledged);
