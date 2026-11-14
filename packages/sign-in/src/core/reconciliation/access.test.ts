@@ -9,7 +9,7 @@ import { createAccess } from './access.js';
 async function aRemoval() {
   const identity = memoryIdentity();
   const setup = aSetup();
-  await createSetup({ identity, fleet: fleetOfMaya(identity), secrets: setup.secrets }).establish(setup.input);
+  await createSetup({ identity, fleet: fleetOfMaya(), secrets: setup.secrets }).establish(setup.input);
   const accountId = setup.secrets.accountId();
   const acknowledged = new Set<string>();
   let isUnavailable = true;

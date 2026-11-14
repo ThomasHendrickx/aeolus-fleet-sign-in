@@ -34,7 +34,8 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       await dropUnlessRetryable(records, { hash, held });
       return null;
     }
-    return records.accountById(held.accountId);
+    const account = await records.accountById(held.accountId);
+    return account?.isDisabled === false ? account : null;
   }
 
   /** An ended record is kept only while a revoked one can still be retried; any other is deleted. */
@@ -57,7 +58,7 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
         if (retryAt > now) return { kind: 'tooManyAttempts' as const, retryAt };
         const account = await records.account(email);
         const isAccepted = await deps.secrets.verifyPassword({ password: input.password, hash: account?.passwordHash ?? null });
-        if (!isAccepted || account === null) {
+        if (!isAccepted || account === null || account.isDisabled) {
           const failedAccount = failed(accountFailures, { now, maximum: ACCOUNT_FAILURES });
           const failedAddress = failed(addressFailures, { now, maximum: ADDRESS_FAILURES });
           await records.saveAttempts({ key: accountKey, attempts: failedAccount });

@@ -21,7 +21,7 @@ afterAll(async () => { await database.close(); await container.stop(); }, 60_000
 describe('durable identity across rollback concurrency and restart', () => {
   it('serializes simultaneous setup and persists the original person mapping through restart', async () => {
     // Given one database and simultaneous setup retries.
-    const fleet = fleetOfMaya(database.identity);
+    const fleet = fleetOfMaya();
     const { establish: setup } = createSetup({ identity: database.identity, fleet, secrets: aSetup().secrets });
 
     // When both commands run and the process reopens its database.
@@ -69,7 +69,7 @@ describe('durable identity across rollback concurrency and restart', () => {
   });
   it('preserves shared revocation through rollback, concurrent sign-out and restart before retrying core', async () => {
     // Given a durable account and shared sign-in, and unavailable core sign-out.
-    const fleet = fleetOfMaya(database.identity);
+    const fleet = fleetOfMaya();
     await createSetup({ identity: database.identity, fleet, secrets: aSetup().secrets }).establish(aSetup().input);
     let sequence = 0;
     const options = { now: () => 900_000, secrets: { token: () => `revocation-${++sequence}`, digest: (value: string) => Promise.resolve(`digest:${value}`), verifyPassword: () => Promise.resolve(true) } };
@@ -109,7 +109,7 @@ describe('access cleanup durability', () => {
     // Given Maya and an interrupted removal transaction.
     const setup = aSetup();
     const accountId = setup.secrets.accountId();
-    await createSetup({ identity: database.identity, fleet: fleetOfMaya(database.identity), secrets: setup.secrets }).establish(setup.input);
+    await createSetup({ identity: database.identity, fleet: fleetOfMaya(), secrets: setup.secrets }).establish(setup.input);
     const original = await database.identity.transaction((records) => records.accountById(accountId));
     if (original === null) throw new Error('Expected Maya');
     await expect(database.identity.transaction(async (records) => {

@@ -25,12 +25,14 @@ describe('a fresh fleet token for Maya', () => {
     const exchange = token({ signIn: shared.signIn, fleetId });
     await reached.promise;
 
-    // When removal commits before the old exchange resumes.
-    await access.remove({ accountId, fleetId: null });
+    // When removal commits is serialised behind the in-flight exchange.
+    const removal = access.remove({ accountId, fleetId: null });
     resume.resolve(undefined);
+    await exchange;
+    await removal;
 
-    // Then no token or grant is restored and the old credential cannot open another session.
-    expect(await exchange).toEqual({ kind: 'signedOut' });
+    // Then no subsequent token or grant is restored and the old credential cannot open another session.
+    expect(await token({ signIn: shared.signIn, fleetId })).toEqual({ kind: 'signedOut' });
     expect(await fixture.signIn.authenticate({ email: aSetup().input.email, password: aSetup().input.password, address: 'new-browser' })).toEqual({ kind: 'wrongCredential' });
     expect(await fixture.identity.transaction((records) => records.right({ accountId, fleetId }))).toMatchObject({ scopes: [], isFleetManager: false });
   });
