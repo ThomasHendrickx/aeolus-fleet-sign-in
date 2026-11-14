@@ -1,9 +1,10 @@
 /** Handwritten transactional identity boundary, with rollback and serialized concurrency. */
 import type { AccountId } from '@aeolus-fleet/common';
 
-import type { Account, Authorization, AuthorizationCode, FailedAttempts, FleetRight, IdentityRecords, SharedSignIn } from '../../src/core/shared/identity.js';
+import type { Account, CleanupTarget, Authorization, AuthorizationCode, FailedAttempts, FleetRight, IdentityRecords, SharedSignIn } from '../../src/core/shared/identity.js';
 
 export function memoryIdentity() {
+  const cleanup = new Map<string, CleanupTarget>();
   const accounts = new Map<string, Account>();
   const rights = new Map<string, FleetRight>();
   const sharedSignIns = new Map<string, SharedSignIn>();
@@ -12,6 +13,11 @@ export function memoryIdentity() {
   const attempts = new Map<string, FailedAttempts>();
   let previous: Promise<unknown> = Promise.resolve();
   const records: IdentityRecords = {
+    rights: (accountId) => Promise.resolve([...rights.values()].filter((right) => right.accountId === accountId)),
+    revokeSharedSignIns: (accountId) => { for (const [hash, shared] of sharedSignIns) if (shared.accountId === accountId) sharedSignIns.delete(hash); return Promise.resolve(); },
+    pendingCleanup: (accountId) => Promise.resolve([...cleanup.values()].find((target) => accountId === undefined || target.accountId === accountId) ?? null),
+    saveCleanup: (target) => { cleanup.set(target.id, target); return Promise.resolve(); },
+    deleteCleanup: (id) => { cleanup.delete(id); return Promise.resolve(); },
     hasAccounts: () => Promise.resolve(accounts.size > 0),
     sharedSignIn: (hash) => Promise.resolve(sharedSignIns.get(hash) ?? null),
     saveSharedSignIn: ({ hash, sharedSignIn }) => { sharedSignIns.set(hash, sharedSignIn); return Promise.resolve(); },
@@ -32,12 +38,13 @@ export function memoryIdentity() {
     saveRight: (right) => { rights.set(`${right.fleetId}/${right.accountId}`, right); return Promise.resolve(); },
   };
   return {
-    accounts, rights, sharedSignIns, authorizations, codes, attempts,
+    cleanup, accounts, rights, sharedSignIns, authorizations, codes, attempts,
     async transaction<T>(work: (records: IdentityRecords) => Promise<T>): Promise<T> {
       const held = previous;
       const released = Promise.withResolvers<undefined>();
       previous = released.promise;
       await held;
+      const savedCleanup = new Map(cleanup);
       const savedSharedSignIns = new Map(sharedSignIns);
       const savedAuthorizations = new Map(authorizations);
       const savedCodes = new Map(codes);
@@ -46,6 +53,7 @@ export function memoryIdentity() {
       const savedRights = new Map(rights);
       try { return await work(records); }
       catch (error) {
+        cleanup.clear(); savedCleanup.forEach((value, key) => cleanup.set(key, value));
         sharedSignIns.clear(); savedSharedSignIns.forEach((value, key) => sharedSignIns.set(key, value));
         authorizations.clear(); savedAuthorizations.forEach((value, key) => authorizations.set(key, value));
         codes.clear(); savedCodes.forEach((value, key) => codes.set(key, value));

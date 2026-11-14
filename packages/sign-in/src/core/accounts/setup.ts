@@ -30,7 +30,7 @@ export function createSetup(deps: { identity: Identity; fleet: PersonFleets; sec
         const existing = await records.account(email);
         const created = existing ?? {
           id: deps.secrets.accountId(), email, displayName: input.displayName,
-          passwordHash: await deps.secrets.hashPassword(input.password), organisationId: 'local',
+          isDisabled: false, accessVersion: 0, passwordHash: await deps.secrets.hashPassword(input.password), organisationId: 'local',
         };
         if (existing === null) await records.saveAccount(created);
         if (await records.right({ accountId: created.id, fleetId: input.fleetId }) === null) await records.saveRight({ accountId: created.id, fleetId: input.fleetId, personShipId: null, scopes: [], groupValues: [], isFleetManager: true });

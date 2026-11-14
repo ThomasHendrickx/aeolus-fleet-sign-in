@@ -13,10 +13,10 @@ async function aRemoval() {
   const accountId = setup.secrets.accountId();
   const acknowledged = new Set<string>();
   let isUnavailable = true;
-  const access = createAccess({ identity, secrets: setup.secrets, cleanup: { async acknowledge(target) {
-    if (isUnavailable) return false;
+  const access = createAccess({ identity, secrets: setup.secrets, cleanup: { acknowledge(target) {
+    if (isUnavailable) return Promise.resolve(false);
     acknowledged.add(`${target.kind}/${target.fleetId ?? 'installation'}`);
-    return true;
+    return Promise.resolve(true);
   } } });
   return { identity, access, accountId, fleetId: setup.input.fleetId, acknowledged, available: () => { isUnavailable = false; } };
 }

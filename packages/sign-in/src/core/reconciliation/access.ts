@@ -1,0 +1,50 @@
+/** Removal and its remote acknowledgements are serialised with recovery and issuance. */
+import type { AccountId, FleetId } from '@aeolus-fleet/common';
+
+import type { AccessCleanup, CleanupTarget, Identity, Secrets } from '../shared/identity.js';
+
+export function createAccess(deps: { identity: Identity; secrets: Secrets; cleanup: AccessCleanup }) {
+  return {
+    remove: (input: { accountId: AccountId; fleetId: FleetId | null }) => deps.identity.transaction(async (records) => {
+      const account = await records.accountById(input.accountId);
+      if (account === null) return { kind: 'notFound' as const };
+      const accessVersion = account.accessVersion + 1;
+      await records.saveAccount({ ...account, accessVersion, isDisabled: input.fleetId === null || account.isDisabled });
+      await records.revokeSharedSignIns(account.id);
+      const rights = await records.rights(account.id);
+      const save = (target: Omit<CleanupTarget, 'id' | 'accountId' | 'shouldReleaseOwnedTrierarchs'>) => records.saveCleanup({ ...target, accountId: account.id, id: `${account.id}/${accessVersion}/${target.kind}/${target.fleetId ?? 'installation'}`, shouldReleaseOwnedTrierarchs: input.fleetId === null });
+      if (input.fleetId === null) await save({ kind: 'cutOff', fleetId: null, personShipId: null });
+      for (const right of rights.filter((right) => input.fleetId === null || right.fleetId === input.fleetId)) {
+        await records.saveRight({ ...right, scopes: [], groupValues: [], isFleetManager: false });
+        await save({ kind: 'fleet', fleetId: right.fleetId, personShipId: right.personShipId });
+        await save({ kind: 'gateway', fleetId: right.fleetId, personShipId: right.personShipId });
+      }
+      return { kind: 'saved' as const };
+    }),
+    /** One target per transaction bounds work. Holding the lock prevents late cleanup racing recovery. */
+    reconcile: () => deps.identity.transaction(async (records) => {
+      const target = await records.pendingCleanup();
+      if (target === null) return { kind: 'complete' as const };
+      let isAcknowledged: boolean;
+      try { isAcknowledged = await deps.cleanup.acknowledge(target); }
+      catch { return { kind: 'pending' as const }; }
+      if (isAcknowledged) await records.deleteCleanup(target.id);
+      return { kind: 'pending' as const };
+    }),
+    recover: async (input: { accountId: AccountId; password: string; shouldEnable: boolean; fleetId: FleetId | null }) => {
+      const passwordHash = await deps.secrets.hashPassword(input.password);
+      return deps.identity.transaction(async (records) => {
+        const account = await records.accountById(input.accountId);
+        if (account === null) return { kind: 'notFound' as const };
+        if (await records.pendingCleanup(account.id) !== null) return { kind: 'pending' as const };
+        await records.saveAccount({ ...account, passwordHash, isDisabled: input.shouldEnable ? false : account.isDisabled, accessVersion: account.accessVersion + 1 });
+        await records.revokeSharedSignIns(account.id);
+        if (input.fleetId !== null) {
+          const right = await records.right({ accountId: account.id, fleetId: input.fleetId });
+          await records.saveRight({ accountId: account.id, fleetId: input.fleetId, personShipId: right?.personShipId ?? null, scopes: [], groupValues: [], isFleetManager: true });
+        }
+        return { kind: 'recovered' as const };
+      });
+    },
+  };
+}

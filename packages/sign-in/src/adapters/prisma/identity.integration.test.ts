@@ -3,6 +3,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
+import { createAccess } from '../../core/reconciliation/access.js';
 import { createSetup } from '../../core/accounts/setup.js';
 import { createSignIn } from '../../core/sign-in/sign-in.js';
 import { createSignOut } from '../../core/sign-in/sign-out.js';
@@ -100,4 +101,39 @@ describe('durable identity across rollback concurrency and restart', () => {
     expect(await database.identity.transaction((records) => records.sharedSignIn(hash))).toEqual({ accountId: 'maya-opaque-account', expiresAt: 0, revokedAt: 900_000 });
   });
 
+});
+
+
+describe('access cleanup durability', () => {
+  it('rolls back removal, survives restart and serialises concurrent cleanup acknowledgements', async () => {
+    // Given Maya and an interrupted removal transaction.
+    const setup = aSetup();
+    const accountId = setup.secrets.accountId();
+    await createSetup({ identity: database.identity, fleet: fleetOfMaya(database.identity), secrets: setup.secrets }).establish(setup.input);
+    const original = await database.identity.transaction((records) => records.accountById(accountId));
+    if (original === null) throw new Error('Expected Maya');
+    await expect(database.identity.transaction(async (records) => {
+      await records.saveAccount({ ...original, isDisabled: true });
+      await records.saveCleanup({ id: 'rollback', accountId, fleetId: null, personShipId: null, kind: 'cutOff', shouldReleaseOwnedTrierarchs: true });
+      throw new Error('Interrupted removal');
+    })).rejects.toThrow('Interrupted removal');
+    expect(await database.identity.transaction((records) => records.pendingCleanup())).toBeNull();
+    expect(await database.identity.transaction((records) => records.accountById(accountId))).toMatchObject({ isDisabled: false });
+    const unavailable = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(false) } });
+
+    // When concurrent commands remove access and the service restarts before acknowledgement.
+    await Promise.all([unavailable.remove({ accountId, fleetId: null }), unavailable.remove({ accountId, fleetId: null })]);
+    await unavailable.reconcile();
+    await database.close();
+    database = await openIdentity(container.getConnectionUri());
+    const acknowledged = new Set<string>();
+    const restarted = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: (target) => { acknowledged.add(target.id); return Promise.resolve(true); } } });
+    while ((await restarted.reconcile()).kind === 'pending') await Promise.all([restarted.reconcile(), restarted.reconcile()]);
+
+    // Then all targets from both removals were retained, acknowledged, and recovery keeps the same mapping.
+    expect(acknowledged.size).toBe(6);
+    expect(await database.identity.transaction((records) => records.pendingCleanup())).toBeNull();
+    expect(await restarted.recover({ accountId, password: 'replacement-password', shouldEnable: true, fleetId: null })).toEqual({ kind: 'recovered' });
+    expect(await database.identity.transaction((records) => records.right({ accountId, fleetId: setup.input.fleetId }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001' });
+  });
 });

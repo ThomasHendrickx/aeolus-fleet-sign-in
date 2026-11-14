@@ -3,6 +3,8 @@ import type { AccountId, FleetId, ShipId } from '@aeolus-fleet/common';
 
 export interface Account {
   readonly id: AccountId;
+  readonly isDisabled: boolean;
+  readonly accessVersion: number;
   readonly email: string;
   readonly displayName: string;
   readonly passwordHash: string;
@@ -19,6 +21,11 @@ export interface FleetRight {
 }
 
 export interface IdentityRecords {
+  rights(accountId: AccountId): Promise<readonly FleetRight[]>;
+  revokeSharedSignIns(accountId: AccountId): Promise<void>;
+  pendingCleanup(accountId?: AccountId): Promise<CleanupTarget | null>;
+  saveCleanup(target: CleanupTarget): Promise<void>;
+  deleteCleanup(id: string): Promise<void>;
   hasAccounts(): Promise<boolean>;
   account(email: string): Promise<Account | null>;
   accountById(id: AccountId): Promise<Account | null>;
@@ -88,4 +95,18 @@ export interface SignInSecrets {
   token(): string;
   digest(value: string): Promise<string>;
   verifyPassword(input: { password: string; hash: string | null }): Promise<boolean>;
+}
+
+/** Each removal target remains durable until the remote side acknowledges it. */
+export interface CleanupTarget {
+  readonly id: string;
+  readonly accountId: AccountId;
+  readonly fleetId: FleetId | null;
+  readonly personShipId: ShipId | null;
+  readonly kind: 'cutOff' | 'fleet' | 'gateway';
+  readonly shouldReleaseOwnedTrierarchs: boolean;
+}
+
+export interface AccessCleanup {
+  acknowledge(target: CleanupTarget): Promise<boolean>;
 }
