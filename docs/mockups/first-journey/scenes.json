@@ -1,0 +1,132 @@
+[
+  {
+    "id": "01-entry",
+    "name": "Console entry",
+    "note": "Existing console account entry after manual issuer configuration. No console redesign."
+  },
+  {
+    "id": "02-credentials",
+    "name": "Local account sign-in",
+    "note": "NEW SERVICE PAGE. Proposal: setup email is the sign-in identifier; account id remains opaque."
+  },
+  {
+    "id": "03-pending",
+    "name": "Credential submission",
+    "note": "NEW SERVICE STATE. Immediate busy feedback; this is not a successful sign-in."
+  },
+  {
+    "id": "04-wrong-credential",
+    "name": "Wrong credential",
+    "note": "NEW SERVICE STATE. Same refusal for unknown email and wrong password; remains signed out."
+  },
+  {
+    "id": "05-too-many-attempts",
+    "name": "Too many attempts",
+    "note": "PROPOSAL: 5 failed attempts/account or 20/address in 15 minutes, then refuse for 15 minutes. Example server time 14:30; retry at 14:45."
+  },
+  {
+    "id": "06-no-rights",
+    "name": "No fleet rights",
+    "note": "Existing console refusal is preserved verbatim. No new organisation administration or Account app is proposed."
+  },
+  {
+    "id": "07-unavailable",
+    "name": "Service unavailable",
+    "note": "Existing console refusal. Never turn an outage into wrong password or argo access. If the service host itself is down, the browser may show its native network error until the app timeout/refusal."
+  },
+  {
+    "id": "08-callback-refused",
+    "name": "Callback refused",
+    "note": "After: existing account callback refusal for expired/unknown state, replayed/refused code, wrong verifier or another browser. Start again; no argo fallback."
+  },
+  {
+    "id": "09-signed-out",
+    "name": "Signed out",
+    "note": "Existing console account sign-out page. PROPOSAL: shared sign-in lasts 12 hours. Shared session and 10-minute fleet token are different."
+  },
+  {
+    "id": "10-session-ended",
+    "name": "Shared sign-in ended",
+    "note": "Existing account page after expiry/revocation. Proposed 12-hour session requires credentials again. Returning with a valid session skips the credential page."
+  },
+  {
+    "id": "11-setup-required",
+    "name": "Public browser before trusted setup",
+    "note": "NEW SERVICE REFUSAL PROPOSAL. Browser cannot claim the installation. Trusted server setup is the only way to create the first account."
+  },
+  {
+    "id": "12-commission",
+    "name": "Commission researcher",
+    "note": "CONTEXT, existing console fields. Before is argo with no person owner to select; after is Maya’s account, with no Owner field. No console implementation is proposed."
+  },
+  {
+    "id": "13-commission-refused",
+    "name": "Commission refused",
+    "note": "CONTEXT, existing commission refusal area with illustrative limit text. Missing scope is likewise shown as the returned refusal; nothing is commissioned. Retry retains original key."
+  },
+  {
+    "id": "14-starting-prompt",
+    "name": "Starting prompt and crew",
+    "note": "CONTEXT, existing starting-prompt route, with no actual credential. Before: not reachable for the named person. After: commission is not agent execution; give researcher a crew."
+  },
+  {
+    "id": "15-bridge-waiting",
+    "name": "Bridge receives a question",
+    "note": "CONTEXT, existing Bridge layout and question path. After: shared sign-in resolves Maya’s stored person ship; gateway keeps the crew token server-side. No new Bridge screen is proposed."
+  },
+  {
+    "id": "16-question-opened",
+    "name": "Question opened",
+    "note": "CONTEXT. Receipt is acknowledged on opening, before answering. researcher asked its owner, Maya’s person ship."
+  },
+  {
+    "id": "17-basket",
+    "name": "Answer in basket",
+    "note": "CONTEXT. Choosing Release adds it to the existing basket; that action alone does not send it."
+  },
+  {
+    "id": "18-sending",
+    "name": "Basket sending",
+    "note": "CONTEXT. Immediate busy state. Success waits for core confirmation of durable storage."
+  },
+  {
+    "id": "19-answer-unsent",
+    "name": "Answer send failed",
+    "note": "CONTEXT. Keep the answer visibly unsent. Retry the same send key, including a lost successful confirmation. No delivery semantics change."
+  },
+  {
+    "id": "20-answer-sent",
+    "name": "Answer sent",
+    "note": "CONTEXT. Gateway confirms core stored the answer; the agent receiving and acknowledging it is a separate protocol step, not inferred from a screenshot."
+  },
+  {
+    "id": "21-gateway-not-connected",
+    "name": "Gateway not connected",
+    "note": "CONTEXT FAILURE PROPOSAL, not an implemented gateway change. Existing gateway connection is required before Bridge is ready. Core retains pending delivery during an outage."
+  },
+  {
+    "id": "22-configuration-failure",
+    "name": "Invalid deployment configuration",
+    "note": "NEW SERVICE REFUSAL PROPOSAL. Invalid registered callback is never redirected to; inaccessible keys or invalid installation token stop the relevant server setup step. No token or secret is displayed."
+  },
+  {
+    "id": "23-credential-unavailable",
+    "name": "Credential service temporarily unavailable",
+    "note": "NEW SERVICE STATE PROPOSAL. Credential processing failed because the service could not complete it; not a wrong-password refusal. If the entire host is down, its browser network error cannot be branded."
+  },
+  {
+    "id": "24-trusted-setup",
+    "name": "Trusted server setup",
+    "note": "CLI OUTPUT PROPOSAL. Password is private input, not echoed. Setup asks name and email, stores opaque id before provisioning, grants all offered fleet scopes and journey reach, argo false. No public signup."
+  },
+  {
+    "id": "25-setup-configuration-refused",
+    "name": "Setup configuration refused",
+    "note": "CLI OUTPUT PROPOSAL. Invalid installation token stops provisioning, leaves durable retry state and never falls back to argo. Keys/callback/domain configuration likewise fail the relevant step."
+  },
+  {
+    "id": "26-setup-retry",
+    "name": "Setup resumes stable identity",
+    "note": "CLI OUTPUT PROPOSAL. Retry resolves persisted account and the same installation person commission key. No duplicate person; agent commission retries belong to the existing console contract."
+  }
+]

@@ -1,0 +1,85 @@
+/** Approved first setup: durable identity precedes provisioning and retries converge. */
+import { describe, expect, it } from 'vitest';
+
+import { memoryIdentity } from '../../../test/support/memory-identity.js';
+import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
+import { createSetup } from './setup.js';
+
+describe('first trusted setup', () => {
+  it('persists the opaque account before provisioning and gives Maya fleet-manager rights without argo', async () => {
+    // Given an existing fleet and trusted setup with a privately supplied password.
+    const identity = memoryIdentity();
+    const fleet = fleetOfMaya(identity);
+    const { establish: setup } = createSetup({ identity, fleet, secrets: aSetup().secrets });
+
+    // When Maya is set up, then setup is retried with the same email.
+    const first = await setup(aSetup().input);
+    const retry = await setup(aSetup().input);
+
+    // Then the same opaque identity, person mapping and all offered scopes survive the retry.
+    expect(first).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' });
+    expect(retry).toEqual(first);
+    expect(identity.accounts.size).toBe(1);
+    expect(identity.rights.get('flt_00000000000000000000000001/maya-opaque-account')).toEqual({
+      fleetId: 'flt_00000000000000000000000001', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001',
+      scopes: ['messages:send', 'messages:receive', 'fleet:read', 'fleet:commission'],
+      groupValues: ['fleet-manager'], isFleetManager: true,
+    });
+    expect(fleet.people.size).toBe(1);
+    expect(identity.accounts.get('maya@example.test')?.passwordHash).toBe('hash-of-private-password');
+  });
+
+  it('resumes a saved account after a lost commission response without creating a second person', async () => {
+    // Given the person commission succeeds but its confirmation is lost.
+    const identity = memoryIdentity();
+    const fleet = fleetOfMaya(identity);
+    fleet.shouldLoseConfirmation = true;
+    const { establish: setup } = createSetup({ identity, fleet, secrets: aSetup().secrets });
+
+    // When the command is retried after the service restarts.
+    expect(await setup(aSetup().input)).toEqual({ kind: 'pending', reason: 'unavailable' });
+    expect(identity.rights.get('flt_00000000000000000000000001/maya-opaque-account')).toMatchObject({ isFleetManager: true, personShipId: null });
+    fleet.shouldLoseConfirmation = false;
+    const { establish: restarted } = createSetup({ identity, fleet, secrets: aSetup().secrets });
+    const result = await restarted(aSetup().input);
+
+    // Then the persisted id and installation commission key resolve the original person.
+    expect(result).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' });
+    expect(identity.accounts.size).toBe(1);
+    expect(fleet.people.size).toBe(1);
+    expect([...fleet.people.keys()]).toEqual(['person-maya-opaque-account']);
+  });
+
+  it('finds the account whose provisioning is pending after core refused the installation, and resumes it', async () => {
+    // Given setup that saved Maya but core refused installation authentication.
+    const identity = memoryIdentity();
+    const fleet = fleetOfMaya(identity);
+    fleet.shouldRefuseInstallation = true;
+    const setup = createSetup({ identity, fleet, secrets: aSetup().secrets });
+    expect(await setup.establish(aSetup().input)).toEqual({ kind: 'pending', reason: 'installationRefused' });
+
+    // When the configuration is fixed and setup looks for pending work, then resumes it.
+    fleet.shouldRefuseInstallation = false;
+    const pending = await setup.pendingAccount(aSetup().input.fleetId);
+    const resumed = await setup.resume({ accountId: aSetup().secrets.accountId(), fleetId: aSetup().input.fleetId });
+
+    // Then it is Maya's saved account, and resuming maps her one person ship.
+    expect(pending).toMatchObject({ id: 'maya-opaque-account', displayName: 'Maya' });
+    expect(resumed).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' });
+    expect(await setup.pendingAccount(aSetup().input.fleetId)).toBeNull();
+    expect(fleet.people.size).toBe(1);
+  });
+
+  it('stores the email in one case and finds it again whatever case setup is given', async () => {
+    // Given trusted setup.
+    const identity = memoryIdentity();
+    const setup = createSetup({ identity, fleet: fleetOfMaya(identity), secrets: aSetup().secrets });
+
+    // When Maya is set up as Maya@Example.TEST, then again as maya@example.test.
+    await setup.establish({ ...aSetup().input, email: 'Maya@Example.TEST' });
+    await setup.establish(aSetup().input);
+
+    // Then one account holds the email in lower case.
+    expect([...identity.accounts.values()].map((account) => account.email)).toEqual(['maya@example.test']);
+  });
+});

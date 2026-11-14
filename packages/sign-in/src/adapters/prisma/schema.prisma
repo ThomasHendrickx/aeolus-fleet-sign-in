@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client"
+  output = "./generated"
+  moduleFormat = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Account {
+  id String @id
+  email String @unique
+  displayName String @map("display_name")
+  passwordHash String @map("password_hash")
+  organisationId String @map("organisation_id")
+  rights FleetRight[]
+  @@map("accounts")
+}
+
+model FleetRight {
+  fleetId String @map("fleet_id")
+  accountId String @map("account_id")
+  personShipId String? @map("person_ship_id")
+  scopes String[]
+  groupValues String[] @map("group_values")
+  isFleetManager Boolean @map("is_fleet_manager")
+  account Account @relation(fields: [accountId], references: [id])
+  @@id([fleetId, accountId])
+  @@index([accountId])
+  @@map("fleet_rights")
+}
+
+model IdentityRecord {
+  key String @id
+  data Json
+  @@map("identity_records")
+}

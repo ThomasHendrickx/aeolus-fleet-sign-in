@@ -12,18 +12,27 @@
     "packages/sign-in"
   ],
   "devDependencies": {
+    "@aeolus-fleet/core": "^0.39.0",
     "@eslint/js": "^10.0.1",
+    "@testcontainers/postgresql": "^12.2.1",
     "@types/node": "^26.6.3",
+    "@types/pg": "^8.23.1",
     "eslint": "^10.11.0",
     "eslint-plugin-check-file": "^3.3.2",
+    "playwright": "^1.65.1",
+    "prisma": "^7.10.1",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.0",
+    "undici": "^8.12.4",
     "vitest": "^5.0.3"
   },
   "scripts": {
-    "typecheck": "tsc --project tsconfig.json",
+    "typecheck": "tsc --project tsconfig.json && tsc --project packages/sign-in/tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run",
-    "test:unit": "vitest run --project '*:unit'"
+    "test:unit": "vitest run --project '*:unit'",
+    "generate": "prisma generate",
+    "build": "npm run generate && npm run build -w packages/sign-in",
+    "postinstall": "prisma generate"
   }
 }
