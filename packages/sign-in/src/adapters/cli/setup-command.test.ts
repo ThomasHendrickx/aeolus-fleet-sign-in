@@ -88,4 +88,18 @@ describe('trusted server setup', () => {
     expect(status).toBe(1);
     expect(terminal.prompted).toEqual([]);
   });
+
+  it('refuses a password shorter than 15 characters before saving anything', async () => {
+    // Given a terminal where Maya types a 14-character password.
+    const terminal = { ...terminalOfMaya(), privatePassword: () => Promise.resolve('fourteen-chars') };
+    const { setup, identity } = setupOfMaya();
+
+    // When setup runs.
+    const status = await runSetup({ fleet: workshop, terminal, setup });
+
+    // Then it asks for a longer password and saves no account.
+    expect(status).toBe(1);
+    expect(terminal.output).toEqual(['A display name, email and a password of at least 15 characters are required.']);
+    expect(identity.accounts.size).toBe(0);
+  });
 });
