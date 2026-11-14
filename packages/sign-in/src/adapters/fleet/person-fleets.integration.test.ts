@@ -30,7 +30,7 @@ describe('the released core person lifecycle', () => {
       core = createApp({ databaseUrl, publicUrl: 'https://core.example.test', installationToken: token, logger: false });
       const url = await core.listen({ host: '127.0.0.1', port: 0 });
       const made = await fetch(`${url}/trpc/installation.fleets.create`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-aeolus-installation-token': token }, body: JSON.stringify({ requestId: 'workshop-setup', name: 'workshop', operatorEmail: 'operator@example.test' }) });
-      const fleet = z.object({ result: z.object({ data: installationFleetsCreateOutputSchema, fleetListOutputSchema }) }).parse(await made.json()).result.data;
+      const fleet = z.object({ result: z.object({ data: installationFleetsCreateOutputSchema }) }).parse(await made.json()).result.data;
       const adapter = createPersonFleets({ url, installationToken: token });
 
       // When the same account is provisioned twice, including after recreating the adapter.

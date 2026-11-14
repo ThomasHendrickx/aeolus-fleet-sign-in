@@ -1,0 +1,60 @@
+/** Installation cleanup preserves person identity and releases only the owned trierarchs. */
+import { fleetListOutputSchema, installationAccountsCutOffOutputSchema, labelsOutputSchema, labelWriteOutputSchema, releaseShipOutputSchema, type FleetId, type ShipId } from '@aeolus-fleet/common';
+import { z } from 'zod';
+
+import type { AccessCleanup, CleanupTarget } from '../../core/shared/identity.js';
+
+const TIMEOUT_MS = 10_000;
+const PAGE_SIZE = 20;
+
+export function createCoreCleanup(options: { url: string; installationToken: string }): AccessCleanup {
+  return {
+    async acknowledge(target) {
+      const signal = AbortSignal.timeout(TIMEOUT_MS);
+      async function call(input: { path: string; fleetId?: FleetId; body?: unknown; query?: unknown }) {
+        const query = input.query === undefined ? '' : `?input=${encodeURIComponent(JSON.stringify(input.query))}`;
+        const response = await fetch(`${options.url.replace(/\/$/, '')}/trpc/${input.path}${query}`, {
+          method: input.body === undefined ? 'GET' : 'POST',
+          headers: { 'content-type': 'application/json', 'x-aeolus-installation-token': options.installationToken, ...(input.fleetId === undefined ? {} : { 'aeolus-fleet': input.fleetId }) },
+          ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }), signal, redirect: 'error',
+        });
+        if (!response.ok) throw new Error('Core cleanup was not acknowledged');
+        return z.object({ result: z.object({ data: z.unknown() }) }).parse(await response.json()).result.data;
+      }
+      try {
+        if (target.kind === 'cutOff') {
+          installationAccountsCutOffOutputSchema.parse(await call({ path: 'installation.accounts.cutOff', body: { accountId: target.accountId } }));
+          return true;
+        }
+        if (target.kind !== 'fleet' || target.fleetId === null) return false;
+        if (target.personShipId === null) return true;
+        const fleetId = target.fleetId;
+        const list = async (query: unknown) => fleetListOutputSchema.parse(await call({ path: 'fleet.list', fleetId, query }));
+        const release = async (shipId: ShipId) => { releaseShipOutputSchema.parse(await call({ path: 'fleet.release', fleetId, body: { shipId } })); };
+        const page = await list({ shipIds: [target.personShipId], limit: 1 });
+        const person = page.items.find((ship) => ship.id === target.personShipId);
+        if (person === undefined || !('labels' in person)) return false;
+        const labels = labelsOutputSchema.parse(await call({ path: 'fleet.labels', fleetId }));
+        const group = labels.find((label) => label.key === 'group' && label.owner.kind === 'installation');
+        for (const label of person.labels.filter((label) => label.labelId === group?.id)) {
+          labelWriteOutputSchema.parse(await call({ path: 'fleet.unassignLabel', fleetId, body: { shipId: person.id, valueId: label.valueId } }));
+        }
+        if (person.status === 'crewed') await release(person.id);
+        if (target.shouldReleaseOwnedTrierarchs) await releaseOwned({ target, list, release });
+        return true;
+      } catch { return false; }
+    },
+  };
+}
+
+async function releaseOwned(input: { target: CleanupTarget; list: (query: unknown) => Promise<z.infer<typeof fleetListOutputSchema>>; release: (shipId: ShipId) => Promise<void> }) {
+  let cursor: string | null = null;
+  do {
+    const page = await input.list({ kind: ['trierarch'], limit: PAGE_SIZE, ...(cursor === null ? {} : { cursor }) });
+    for (const ship of page.items) {
+      if (!('ownerShipId' in ship)) throw new Error('Installation could not read a trierarch owner');
+      if (ship.ownerShipId === input.target.personShipId && ship.status === 'crewed') await input.release(ship.id);
+    }
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+}
