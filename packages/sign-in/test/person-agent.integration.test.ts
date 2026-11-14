@@ -117,6 +117,35 @@ describe('the first person owns and answers the same agent', () => {
       expect(repeatedAnswer.messageId).toBe(answer.messageId);
       expect(whoamiOutputSchema.parse(await who.json()).ownerShipId).toBe(first.personShipId);
       expect(received).toMatchObject({ senderShipId: first.personShipId, inReplyTo: question.messageId, contentType: 'application/vnd.aeolus.answer+json', payload: JSON.stringify({ questionId, option: 1 }) });
+
+      const operatorTicket = async (accountId?: string) => z.object({ result: z.object({ data: z.object({ ticket: z.string() }) }) }).parse(await post(`${coreUrl}/trpc/installation.operators.issueSignInTicket`, { headers: { 'x-aeolus-installation-token': installationToken }, body: { fleetId: fleet.fleetId, ...(accountId === undefined ? {} : { account: { id: accountId } }) } })).result.data.ticket;
+      const redeemTicket = async (ticket: string) => {
+        const response = await fetch(`${coreUrl}/trpc/console.redeemSignInTicket`, { method: 'POST', headers: json, body: JSON.stringify({ ticket }) });
+        expect(response.status).toBe(200);
+        return response.headers.get('set-cookie')?.split(';')[0] ?? '';
+      };
+      const linkedCookie = await redeemTicket(await operatorTicket(first.accountId));
+      const session = (cookie: string) => fetch(`${coreUrl}/trpc/console.session`, { headers: { cookie, 'aeolus-fleet': fleet.fleetId } });
+      expect((await session(linkedCookie)).status).toBe(200);
+
+      // When Maya signs out through the service, core sign-out succeeds without cutting off tokens or agents.
+      const revoked = await fetch(`${origin}/oauth/revoke`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: shared.signIn, client_id: 'console', client_secret: 'client-fixture' }) });
+      expect(revoked.status).toBe(200);
+      expect((await session(linkedCookie)).status).toBe(401);
+      // Independent argo recovery still opens without asking the account issuer.
+      const recoveryCookie = await redeemTicket(await operatorTicket());
+      expect((await session(recoveryCookie)).status).toBe(200);
+      expect(await service.signIn.account(shared.signIn)).toEqual({ kind: 'signedOut' });
+      const returning = await service.signIn.authenticate({ email: setupInput.email, password: setupInput.password, address: 'returning-browser' });
+      if (returning.kind !== 'authenticated') throw new Error('Expected returning authentication');
+      expect(await service.signIn.account(returning.signIn)).toMatchObject({ kind: 'account', account: { id: first.accountId } });
+      expect(await service.setup.establish(setupInput)).toEqual(first);
+      expect(commissionShipOutputSchema.parse(await post(`${coreUrl}/api/v1/fleet/commission`, { headers: accountHeaders, body: commission })).shipId).toBe(agent.shipId);
+      const afterSignOut = await fetch(`${coreUrl}/api/v1/ship/whoami`, { headers: agentHeaders });
+      expect(afterSignOut.status).toBe(200);
+      expect(whoamiOutputSchema.parse(await afterSignOut.json()).ownerShipId).toBe(first.personShipId);
+      const continued = sendOutputSchema.parse(await post(`${coreUrl}/api/v1/ship/send`, { headers: agentHeaders, body: { selector: { kind: 'ship', shipId: first.personShipId }, payload: 'Agent continues after human sign-out', idempotencyKey: 'after-human-sign-out', model: 'gpt-6.1-sol' } }));
+      expect(continued.messageId).toBeTruthy();
     } finally {
       await dispatcher?.close();
       setGlobalDispatcher(previousDispatcher);

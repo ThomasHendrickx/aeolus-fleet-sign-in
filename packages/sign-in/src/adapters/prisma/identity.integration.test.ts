@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
 import { createSetup } from '../../core/accounts/setup.js';
 import { createSignIn } from '../../core/sign-in/sign-in.js';
+import { createSignOut } from '../../core/sign-in/sign-out.js';
 import { openIdentity } from './identity.js';
 
 let container: Awaited<ReturnType<PostgreSqlContainer['start']>>;
@@ -65,4 +66,38 @@ describe('durable identity across rollback concurrency and restart', () => {
     expect((await restarted.account(authenticated.signIn)).kind).toBe('account');
     expect(await restarted.authenticate({ email: original.email, password: 'private-password', address: 'address' })).toEqual({ kind: 'tooManyAttempts', retryAt: 900_000 });
   });
+  it('preserves shared revocation through rollback, concurrent sign-out and restart before retrying core', async () => {
+    // Given a durable account and shared sign-in, and unavailable core sign-out.
+    const fleet = fleetOfMaya(database.identity);
+    await createSetup({ identity: database.identity, fleet, secrets: aSetup().secrets }).establish(aSetup().input);
+    let sequence = 0;
+    const options = { now: () => 900_000, secrets: { token: () => `revocation-${++sequence}`, digest: (value: string) => Promise.resolve(`digest:${value}`), verifyPassword: () => Promise.resolve(true) } };
+    const signIn = createSignIn({ ...options, identity: database.identity });
+    const shared = await signIn.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'revocation-browser' });
+    if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
+    const hash = `digest:${shared.signIn}`;
+    await expect(database.identity.transaction(async (records) => {
+      const held = await records.sharedSignIn(hash);
+      if (held === null) throw new Error('Expected shared sign-in');
+      await records.saveSharedSignIn({ hash, sharedSignIn: { ...held, expiresAt: 0 } });
+      throw new Error('Rollback sign-out');
+    })).rejects.toThrow('Rollback sign-out');
+    expect((await signIn.account(shared.signIn)).kind).toBe('account');
+    fleet.shouldFailSignOut = true;
+    const signOut = createSignOut({ signIn, sessions: fleet });
+
+    // When concurrent sign-outs commit locally, fail remotely, and the service restarts.
+    expect(await Promise.all([signOut(shared.signIn), signOut(shared.signIn)])).toEqual([{ kind: 'unavailable' }, { kind: 'unavailable' }]);
+    await database.close();
+    database = await openIdentity(container.getConnectionUri());
+    const restarted = createSignIn({ ...options, identity: database.identity });
+    fleet.shouldFailSignOut = false;
+
+    // Then neither app can use the shared sign-in, while retry still resolves its original account for core.
+    expect(await restarted.account(shared.signIn)).toEqual({ kind: 'signedOut' });
+    expect(await createSignOut({ signIn: restarted, sessions: fleet })(shared.signIn)).toEqual({ kind: 'signedOut' });
+    expect(fleet.signedOutAccounts).toEqual(new Set(['maya-opaque-account']));
+    expect(await database.identity.transaction((records) => records.sharedSignIn(hash))).toEqual({ accountId: 'maya-opaque-account', expiresAt: 0 });
+  });
+
 });

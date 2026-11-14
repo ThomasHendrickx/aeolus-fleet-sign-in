@@ -18,14 +18,15 @@ const redirectUri = 'https://console.example.test/sign-in/done';
 const client = { id: 'console', secret: 'fixture-client-secret', redirectUri };
 const gatewayClient = { id: 'gateway', secret: 'fixture-gateway-secret', redirectUri: 'https://bridge.example.test/sign-in/done' };
 
-async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: string; now?: () => number; isUnavailable?: () => boolean } = {}) {
-  const { shouldSetUp = true, trustedProxy, now = () => Date.now(), isUnavailable = () => false } = options;
+async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: string; now?: () => number; isUnavailable?: () => boolean; isIssuerUnavailable?: () => boolean } = {}) {
+  const { shouldSetUp = true, trustedProxy, now = () => Date.now(), isUnavailable = () => false, isIssuerUnavailable = () => false } = options;
   const identity = memoryIdentity();
   const fleet = fleetOfMaya(identity);
   const real = createSecrets({ passwordCost: FIXTURE_PASSWORD_COST });
   const secrets = { ...real, verifyPassword: (input: { password: string; hash: string | null }) => isUnavailable() ? Promise.reject(new Error('Credential processing failed')) : real.verifyPassword(input) };
   const { privateKey } = generateKeyPairSync('ed25519');
-  const signer = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
+  const realSigner = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
+  const signer = { ...realSigner, sign: (claims: Parameters<typeof realSigner.sign>[0]) => isIssuerUnavailable() ? Promise.reject(new Error('Issuer unavailable')) : realSigner.sign(claims) };
   const app = createService({ identity, fleet, secrets, signer, now, config: {
     origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client, gatewayClient], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
@@ -119,6 +120,76 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect((await app.server.inject({ method: 'GET', url: '/api/apps', headers: { authorization: basicOf(client), 'aeolus-sign-in': shared.signIn } })).statusCode).toBe(401);
       expect((await jwtVerify(issued.access_token, createLocalJWKSet(signer.publicKeys), { issuer: origin })).payload.sub).toBe(accountId);
       expect((await app.server.inject(revoke)).statusCode).toBe(200);
+    } finally { await app.server.close(); }
+  });
+
+  it('returns to the same account with fresh fleet tokens and reauthenticates at the fixed twelve-hour deadline', async () => {
+    // Given Maya's shared sign-in and existing person mapping at authentication time.
+    const clock = { now: 0 };
+    const { app, secrets, signer, identity, fleet } = await serviceOfMaya({ now: () => clock.now });
+    try {
+      const shared = await app.signIn.authenticate({ email: 'maya@example.test', password: aSetup().input.password, address: 'browser' });
+      if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
+      const query = new URLSearchParams({ response_type: 'code', client_id: gatewayClient.id, redirect_uri: gatewayClient.redirectUri, state: 'returning-browser', code_challenge: await secrets.digest('returning-verifier'), code_challenge_method: 'S256' });
+      const authorize = () => app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}`, headers: { cookie: `aeolus_account_session=${shared.signIn}` } });
+      const exchange = () => app.server.inject({ method: 'POST', url: '/oauth/token', ...form({ grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange', subject_token_type: 'urn:aeolus:params:oauth:token-type:sign-in', subject_token: shared.signIn, resource: aSetup().input.fleetId, client_id: gatewayClient.id, client_secret: gatewayClient.secret }) });
+      const read = async () => {
+        const issued = z.object({ access_token: z.string(), expires_in: z.literal(600) }).parse((await exchange()).json());
+        return (await jwtVerify(issued.access_token, createLocalJWKSet(signer.publicKeys), { currentDate: new Date(clock.now), issuer: origin, audience: aSetup().input.fleetId })).payload;
+      };
+      const first = await read();
+
+      // When another app returns just before token expiry, and again before shared sign-in expiry.
+      clock.now = 540_000;
+      const returning = await authorize();
+      const refreshed = await read();
+      clock.now = 43_199_000;
+      const last = await read();
+      clock.now = 43_200_000;
+      const expired = await authorize();
+      const refused = await exchange();
+      const reauthenticated = await app.signIn.authenticate({ email: 'maya@example.test', password: aSetup().input.password, address: 'browser' });
+
+      // Then reuse skips credentials without renewing the cookie, expiry asks again, and identity never changes.
+      expect(returning.statusCode).toBe(303);
+      expect(String(returning.headers['set-cookie'])).not.toContain('aeolus_account_session=');
+      expect(first).toMatchObject({ iat: 0, exp: 600, argo: false });
+      expect(refreshed).toMatchObject({ sub: first.sub, person_ship: first.person_ship, iat: 540, exp: 1140, argo: false });
+      expect(last).toMatchObject({ sub: first.sub, person_ship: first.person_ship, iat: 43199, exp: 43799 });
+      expect(expired.statusCode).toBe(200);
+      expect(expired.body).toContain('data-testid="sign-in-form"');
+      expect(refused.json()).toEqual({ error: 'invalid_grant' });
+      expect(reauthenticated.kind).toBe('authenticated');
+      if (reauthenticated.kind !== 'authenticated') throw new Error('Expected returning authentication');
+      expect(await app.signIn.account(reauthenticated.signIn)).toMatchObject({ kind: 'account', account: { id: first.sub } });
+      expect(identity.accounts.size).toBe(1);
+      expect(fleet.people.size).toBe(1);
+    } finally { await app.server.close(); }
+  });
+
+  it('keeps valid tokens usable during issuer outage but refuses fresh tokens distinctly from signed-out and no-rights', async () => {
+    // Given an issued account token and a shared sign-in with rights in workshop only.
+    const state = { now: 0, isUnavailable: false };
+    const { app, signer } = await serviceOfMaya({ now: () => state.now, isIssuerUnavailable: () => state.isUnavailable });
+    try {
+      const shared = await app.signIn.authenticate({ email: 'maya@example.test', password: aSetup().input.password, address: 'browser' });
+      if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
+      const exchange = (signIn: string, fleetId: string) => app.server.inject({ method: 'POST', url: '/oauth/token', ...form({ grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange', subject_token_type: 'urn:aeolus:params:oauth:token-type:sign-in', subject_token: signIn, resource: fleetId, client_id: client.id, client_secret: client.secret }) });
+      const issued = z.object({ access_token: z.string() }).parse((await exchange(shared.signIn, aSetup().input.fleetId)).json());
+
+      // When the issuer cannot sign new tokens, existing tokens reach their own fixed deadline.
+      state.isUnavailable = true;
+      state.now = 599_000;
+      const unavailable = await exchange(shared.signIn, aSetup().input.fleetId);
+      const keys = createLocalJWKSet(signer.publicKeys);
+
+      // Then the previous token still verifies, later expires, and the three refusal outcomes stay distinct.
+      expect((await jwtVerify(issued.access_token, keys, { currentDate: new Date(state.now) })).payload.exp).toBe(600);
+      await expect(jwtVerify(issued.access_token, keys, { currentDate: new Date(630_000), clockTolerance: 30 })).rejects.toMatchObject({ code: 'ERR_JWT_EXPIRED' });
+      expect(unavailable.statusCode).toBe(503);
+      expect(unavailable.json()).toEqual({ error: 'temporarily_unavailable' });
+      expect((await exchange('unknown', aSetup().input.fleetId)).json()).toEqual({ error: 'invalid_grant' });
+      expect((await exchange(shared.signIn, 'flt_00000000000000000000000002')).json()).toEqual({ error: 'invalid_target' });
     } finally { await app.server.close(); }
   });
 
