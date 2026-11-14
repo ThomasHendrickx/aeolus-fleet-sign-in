@@ -10,6 +10,11 @@ import type { FleetRight } from '../../core/shared/identity.js';
 import { CoreCompatibilityError } from './core-compatibility-error.js';
 
 export const MINIMUM_CORE_VERSION = '0.39.0';
+const [MINIMUM_MAJOR = 0, MINIMUM_MINOR = 0] = MINIMUM_CORE_VERSION.split('.').map(Number);
+/** Core's development builds report this version and are accepted. */
+const DEVELOPMENT_VERSION = '0.0.0';
+/** The design's person ship name: `person-` and the first 12 account-id characters. */
+const PERSON_NAME_ACCOUNT_CHARACTERS = 12;
 const TIMEOUT_MS = 10_000;
 const MANAGER_GROUP = 'fleet-manager';
 
@@ -57,8 +62,8 @@ export function createPersonFleets(options: { url: string; installationToken: st
       let version: string;
       try { version = z.object({ server: z.string().regex(/^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/) }).parse(await call({ path: '/api/version' })).server; }
       catch { throw new CoreCompatibilityError({ minimum: MINIMUM_CORE_VERSION, reported: null }); }
-      const parts = version.split('.');
-      if (version !== '0.0.0' && Number(parts[0]) === 0 && Number(parts[1]) < 39) throw new CoreCompatibilityError({ minimum: MINIMUM_CORE_VERSION, reported: version });
+      const [major = 0, minor = 0] = version.split('.').map(Number);
+      if (version !== DEVELOPMENT_VERSION && (major < MINIMUM_MAJOR || (major === MINIMUM_MAJOR && minor < MINIMUM_MINOR))) throw new CoreCompatibilityError({ minimum: MINIMUM_CORE_VERSION, reported: version });
     },
     async reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight> {
       const found = await call({ path: `/trpc/installation.fleets.get?input=${encodeURIComponent(JSON.stringify({ fleetId: input.fleetId }))}` });
@@ -66,7 +71,7 @@ export function createPersonFleets(options: { url: string; installationToken: st
       const namespaces = scopesOutputSchema.parse(await call({ path: '/trpc/fleet.scopes', fleetId: input.fleetId }));
       const groupValueId = await groupOf(input.fleetId);
       const person = commissionShipOutputSchema.parse(await call({ path: '/trpc/fleet.commission', fleetId: input.fleetId, body: {
-        name: `person-${input.accountId.slice(0, 12)}`, type: 'person', kind: 'person', idempotencyKey: `person-${input.accountId}`,
+        name: `person-${input.accountId.slice(0, PERSON_NAME_ACCOUNT_CHARACTERS)}`, type: 'person', kind: 'person', idempotencyKey: `person-${input.accountId}`,
         scopes: ['messages:send', 'messages:receive'], valueIds: [groupValueId],
       } }));
       await call({ path: '/trpc/fleet.assignLabel', fleetId: input.fleetId, body: { shipId: person.shipId, valueId: groupValueId } });

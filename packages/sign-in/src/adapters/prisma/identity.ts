@@ -12,6 +12,9 @@ import { PrismaClient, type Prisma } from './generated/client.js';
 const sharedSignInSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number() });
 const authorizationSchema = z.object({ clientId: z.string(), redirectUri: z.string(), state: z.string(), codeChallenge: z.string(), browser: z.string(), expiresAt: z.number() });
 const codeSchema = z.object({ clientId: z.string(), redirectUri: z.string(), codeChallenge: z.string(), signInHash: z.string(), expiresAt: z.number() });
+/** One advisory lock key serialises this installation's identity transitions and migrations. */
+const IDENTITY_LOCK = 1810;
+const TRANSACTION_TIMEOUT_MS = 15_000;
 const attemptsSchema = z.object({ failures: z.array(z.number()), refusedUntil: z.number() });
 
 export async function openIdentity(databaseUrl: string) {
@@ -20,9 +23,9 @@ export async function openIdentity(databaseUrl: string) {
   const identity: Identity = {
     transaction: (work) => client.$transaction(async (transaction) => {
       // One installation's first-person identity transitions are short and serialized across processes.
-      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(1810)`;
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(${IDENTITY_LOCK})`;
       return work(recordsOf(transaction));
-    }, { timeout: 15_000, maxWait: 15_000 }),
+    }, { timeout: TRANSACTION_TIMEOUT_MS, maxWait: TRANSACTION_TIMEOUT_MS }),
   };
   return { identity, close: () => client.$disconnect() };
 }
@@ -76,7 +79,7 @@ async function migrate(databaseUrl: string) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock(1810)');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [IDENTITY_LOCK]);
     await client.query('CREATE TABLE IF NOT EXISTS sign_in_migrations (version INTEGER PRIMARY KEY)');
     const applied = await client.query('SELECT version FROM sign_in_migrations WHERE version = 1');
     if (applied.rowCount === 0) {

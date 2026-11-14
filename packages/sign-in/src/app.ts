@@ -17,6 +17,11 @@ import { credentialPage, refusalPage, signInStyles } from './adapters/http/pages
 
 const sharedCookie = 'aeolus_account_session';
 const browserCookie = 'aeolus_sign_in_browser';
+/** The browser-binding cookie lives as long as a sign-in flow: 10 minutes. */
+const BROWSER_BINDING_SECONDS = 600;
+const BODY_LIMIT_BYTES = 16_384;
+const REQUEST_TIMEOUT_MS = 15_000;
+const BASIC_PREFIX = 'Basic ';
 const authorizeSchema = z.object({ response_type: z.literal('code'), client_id: z.string(), redirect_uri: z.url(), state: z.string().min(1).max(1024), code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code_challenge_method: z.literal('S256') });
 const credentialSchema = z.object({ flow: z.string().min(1).max(256), email: z.email().max(320), password: z.string().min(1).max(1024) });
 const fieldsSchema = z.record(z.string(), z.string());
@@ -24,7 +29,7 @@ const script = await readFile(new URL('./adapters/http/assets/sign-in.js', impor
 
 export function createService(deps: { identity: Identity; fleet: PersonFleets; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number }) {
   const config = serviceConfigSchema.parse(deps.config);
-  const server = Fastify({ logger: false, trustProxy: config.trustedProxy ?? false, bodyLimit: 16_384, requestTimeout: 15_000 });
+  const server = Fastify({ logger: false, trustProxy: config.trustedProxy ?? false, bodyLimit: BODY_LIMIT_BYTES, requestTimeout: REQUEST_TIMEOUT_MS });
   const signIn = createSignIn(deps);
   const token = createAccountToken({ ...deps, issuer: config.origin, signIn });
   const setup = createSetup(deps);
@@ -51,7 +56,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     if (client === undefined) return invalidConfiguration(reply);
     if (!await deps.identity.transaction((records) => records.hasAccounts())) return reply.code(503).type('text/html').send(refusalPage({ heading: 'Sign-in is not ready', text: 'The person who runs this installation must finish setup on the server before you can sign in.' }));
     const browser = cookiesOf(request)[browserCookie] ?? deps.secrets.token();
-    reply.header('set-cookie', cookie({ name: browserCookie, value: browser, seconds: 600 }));
+    reply.header('set-cookie', cookie({ name: browserCookie, value: browser, seconds: BROWSER_BINDING_SECONDS }));
     const flow = await signIn.begin({ clientId: client.id, redirectUri: client.redirectUri, state: input.state, codeChallenge: input.code_challenge, browser });
     const shared = cookiesOf(request)[sharedCookie];
     if (shared !== undefined) {
@@ -141,8 +146,8 @@ function clientOf(request: FastifyRequest, input: { config: ServiceConfig; field
   let id = input.fields.client_id;
   let secret = input.fields.client_secret;
   const authorization = headerOf(request, 'authorization');
-  if (authorization.startsWith('Basic ')) {
-    const decoded = Buffer.from(authorization.slice(6), 'base64').toString();
+  if (authorization.startsWith(BASIC_PREFIX)) {
+    const decoded = Buffer.from(authorization.slice(BASIC_PREFIX.length), 'base64').toString();
     const separator = decoded.indexOf(':');
     if (separator < 0) return false;
     try { id = decodeURIComponent(decoded.slice(0, separator)); secret = decodeURIComponent(decoded.slice(separator + 1)); } catch { return false; }
