@@ -15,6 +15,12 @@ export function fleetOfMaya(identity: Identity) {
   const people = new Map<string, ShipId>();
   const fleet = {
     people, shouldLoseConfirmation: false, shouldRefuseInstallation: false,
+    signedOutAccounts: new Set<AccountId>(), shouldFailSignOut: false,
+    signOut(accountId: AccountId) {
+      if (fleet.shouldFailSignOut) return Promise.reject(new Error('Core sign-out unavailable'));
+      fleet.signedOutAccounts.add(accountId);
+      return Promise.resolve();
+    },
     async reconcile(input: { accountId: AccountId; fleetId: FleetId }) {
       const account = await identity.transaction((records) => records.accountById(input.accountId));
       if (account === null) throw new Error('Account must already be durable');

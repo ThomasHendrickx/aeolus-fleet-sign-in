@@ -30,7 +30,7 @@ async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: st
     origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client, gatewayClient], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
   if (shouldSetUp) expect((await app.setup.establish(aSetup().input)).kind).toBe('ready');
-  return { app, secrets, signer, identity };
+  return { app, secrets, signer, identity, fleet };
 }
 
 function form(fields: Record<string, string>) { return { headers: { 'content-type': 'application/x-www-form-urlencoded' }, payload: new URLSearchParams(fields).toString() }; }
@@ -89,6 +89,35 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(signed.body).not.toContain(aSetup().input.password);
       const apps = await app.server.inject({ method: 'GET', url: '/api/apps', headers: { authorization: `Basic ${Buffer.from(`${client.id}:${client.secret}`).toString('base64')}`, 'aeolus-sign-in': shared } });
       expect(apps.json()).toMatchObject({ account: { email: 'maya@example.test', firstName: 'Maya' }, fleets: [{ id: aSetup().input.fleetId, name: 'workshop' }] });
+    } finally { await app.server.close(); }
+  });
+
+  it('revokes shared sign-in before core sign-out, retries unavailable core, and preserves issued tokens', async () => {
+    // Given Maya's shared sign-in, a valid fleet token and an unavailable core sign-out.
+    const { app, fleet, signer } = await serviceOfMaya();
+    try {
+      const shared = await app.signIn.authenticate({ email: 'maya@example.test', password: aSetup().input.password, address: 'browser' });
+      if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
+      const exchange = { method: 'POST' as const, url: '/oauth/token', ...form({ grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange', subject_token_type: 'urn:aeolus:params:oauth:token-type:sign-in', subject_token: shared.signIn, resource: aSetup().input.fleetId, client_id: client.id, client_secret: client.secret }) };
+      const issued = z.object({ access_token: z.string() }).parse((await app.server.inject(exchange)).json());
+      fleet.shouldFailSignOut = true;
+      const revoke = { method: 'POST' as const, url: '/oauth/revoke', ...form({ token: shared.signIn, client_id: gatewayClient.id, client_secret: gatewayClient.secret }) };
+
+      // When Bridge signs out while core is unavailable, then retries after it returns.
+      const unavailable = await app.server.inject(revoke);
+      const afterSignOut = await app.server.inject(exchange);
+      fleet.shouldFailSignOut = false;
+      const retried = await app.server.inject(revoke);
+
+      // Then the shared sign-in is unusable across apps immediately, and retry still signs out core without cutting off tokens.
+      expect(unavailable.statusCode).toBe(503);
+      expect(unavailable.json()).toMatchObject({ error: 'temporarily_unavailable' });
+      expect(afterSignOut.json()).toEqual({ error: 'invalid_grant' });
+      expect(retried.statusCode).toBe(200);
+      expect(fleet.signedOutAccounts).toEqual(new Set(['maya-opaque-account']));
+      expect((await app.server.inject({ method: 'GET', url: '/api/apps', headers: { authorization: basicOf(client), 'aeolus-sign-in': shared.signIn } })).statusCode).toBe(401);
+      expect((await jwtVerify(issued.access_token, createLocalJWKSet(signer.publicKeys), { issuer: origin })).payload.sub).toBe('maya-opaque-account');
+      expect((await app.server.inject(revoke)).statusCode).toBe(200);
     } finally { await app.server.close(); }
   });
 
