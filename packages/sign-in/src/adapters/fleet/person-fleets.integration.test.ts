@@ -12,6 +12,8 @@ import { z } from 'zod';
 import { aSetup } from '../../../test/support/setup-fixtures.js';
 import { createCoreCleanup } from './core-cleanup.js';
 import { createPersonFleets } from './person-fleets.js';
+import { acknowledged, personShipFound } from '../../../test/support/cleanup-outcomes.js';
+import { cleanupTargetIdSchema } from '../../core/shared/identity.js';
 
 const run = promisify(execFile);
 const token = 'test-installation-token-not-a-deployment-secret';
@@ -73,14 +75,13 @@ describe('the released core person lifecycle', () => {
 
       // When durable removal reconciles a bounded page, then resumes at its saved cursor.
       const cleanup = createCoreCleanup({ url, installationToken: token });
-      const target = { id: 'removal', attempts: 0, cursor: null, ...input, personShipId: first.personShipId, shouldReleaseOwnedTrierarchs: true };
-      expect(await cleanup.acknowledge({ ...target, kind: 'fleet', personShipId: null })).toEqual({ personShipId: first.personShipId });
-      expect(await cleanup.acknowledge({ ...target, kind: 'cutOff', fleetId: null })).toBe(true);
+      const target = { id: cleanupTargetIdSchema.parse('removal'), attempts: 0, cursor: null, ...input, personShipId: first.personShipId, shouldReleaseOwnedTrierarchs: true };
+      expect(await cleanup.acknowledge({ ...target, kind: 'fleet', personShipId: null })).toEqual(personShipFound(first.personShipId));
+      expect(await cleanup.acknowledge({ ...target, kind: 'cutOff', fleetId: null })).toEqual(acknowledged);
       const firstPage = await cleanup.acknowledge({ ...target, kind: 'fleet' });
-      expect(typeof firstPage).toBe('object');
-      if (typeof firstPage !== 'object' || !('cursor' in firstPage)) throw new Error('Expected another cleanup page');
-      expect(await cleanup.acknowledge({ ...target, cursor: firstPage.cursor, kind: 'fleet' })).toBe(true);
-      expect(await cleanup.acknowledge({ ...target, cursor: firstPage.cursor, kind: 'fleet' })).toBe(true);
+      if (!firstPage.isOk || firstPage.value.kind !== 'pageReleased') throw new Error('Expected another cleanup page');
+      expect(await cleanup.acknowledge({ ...target, cursor: firstPage.value.cursor, kind: 'fleet' })).toEqual(acknowledged);
+      expect(await cleanup.acknowledge({ ...target, cursor: firstPage.value.cursor, kind: 'fleet' })).toEqual(acknowledged);
       expect((await fetch(`${url}/api/v1/ship/whoami`, { headers: { authorization: `Bearer ${personToken}` } })).status).toBe(401);
       expect((await fetch(`${url}/api/v1/ship/whoami`, { headers: { authorization: `Bearer ${trierarchToken}` } })).status).toBe(401);
       expect((await fetch(`${url}/api/v1/ship/whoami`, { headers: { authorization: `Bearer ${agentToken}` } })).status).toBe(200);

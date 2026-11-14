@@ -2,11 +2,14 @@
 import { commissionShipOutputSchema, fleetListOutputSchema, installationAccountsCutOffOutputSchema, labelsOutputSchema, labelWriteOutputSchema, releaseShipOutputSchema, type FleetId, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
-import type { AccessCleanup, CleanupTarget } from '../../core/shared/identity.js';
+import type { AccessCleanup, CleanupFailure, CleanupProgress, CleanupTarget } from '../../core/shared/identity.js';
+import type { Result } from '../../core/shared/result.js';
 
 const TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 20;
 const PERSON_NAME_ACCOUNT_CHARACTERS = 12;
+const acknowledged = { isOk: true, value: { kind: 'acknowledged' } } as const;
+const unavailable = { isOk: false, error: { kind: 'unavailable' } } as const;
 
 export function createCoreCleanup(options: { url: string; installationToken: string }): AccessCleanup {
   return {
@@ -25,22 +28,22 @@ export function createCoreCleanup(options: { url: string; installationToken: str
       try {
         if (target.kind === 'cutOff') {
           installationAccountsCutOffOutputSchema.parse(await call({ path: 'installation.accounts.cutOff', body: { accountId: target.accountId } }));
-          return true;
+          return acknowledged;
         }
-        if (target.kind !== 'fleet' || target.fleetId === null) return false;
+        if (target.kind !== 'fleet' || target.fleetId === null) return unavailable;
         if (target.personShipId === null) {
           const person = commissionShipOutputSchema.parse(await call({ path: 'fleet.commission', fleetId: target.fleetId, body: {
             name: `person-${target.accountId.slice(0, PERSON_NAME_ACCOUNT_CHARACTERS)}`, type: 'person', kind: 'person',
             scopes: ['messages:send', 'messages:receive'], idempotencyKey: `person-${target.accountId}`,
           } }));
-          return { personShipId: person.shipId };
+          return { isOk: true, value: { kind: 'personShipFound', personShipId: person.shipId } };
         }
         const fleetId = target.fleetId;
         const list = async (query: unknown) => fleetListOutputSchema.parse(await call({ path: 'fleet.list', fleetId, query }));
         const release = async (shipId: ShipId) => { releaseShipOutputSchema.parse(await call({ path: 'fleet.release', fleetId, body: { shipId } })); };
         const page = await list({ shipIds: [target.personShipId], limit: 1 });
         const person = page.items.find((ship) => ship.id === target.personShipId);
-        if (person === undefined || !('labels' in person)) return false;
+        if (person === undefined || !('labels' in person)) return unavailable;
         const labels = labelsOutputSchema.parse(await call({ path: 'fleet.labels', fleetId }));
         const group = labels.find((label) => label.key === 'group' && label.owner.kind === 'installation');
         for (const label of person.labels.filter((label) => label.labelId === group?.id)) {
@@ -48,17 +51,17 @@ export function createCoreCleanup(options: { url: string; installationToken: str
         }
         if (person.status === 'crewed') await release(person.id);
         if (target.shouldReleaseOwnedTrierarchs) return await releaseOwned({ target, list, release });
-        return true;
-      } catch { return false; }
+        return acknowledged;
+      } catch { return unavailable; }
     },
   };
 }
 
-async function releaseOwned(input: { target: CleanupTarget; list: (query: unknown) => Promise<z.infer<typeof fleetListOutputSchema>>; release: (shipId: ShipId) => Promise<void> }) {
+async function releaseOwned(input: { target: CleanupTarget; list: (query: unknown) => Promise<z.infer<typeof fleetListOutputSchema>>; release: (shipId: ShipId) => Promise<void> }): Promise<Result<CleanupProgress, CleanupFailure>> {
   const page = await input.list({ kind: ['trierarch'], limit: PAGE_SIZE, ...(input.target.cursor === null ? {} : { cursor: input.target.cursor }) });
   for (const ship of page.items) {
     if (!('ownerShipId' in ship)) throw new Error('Installation could not read a trierarch owner');
     if (ship.ownerShipId === input.target.personShipId && ship.status === 'crewed') await input.release(ship.id);
   }
-  return page.nextCursor === null ? true : { cursor: page.nextCursor };
+  return page.nextCursor === null ? acknowledged : { isOk: true, value: { kind: 'pageReleased', cursor: page.nextCursor } };
 }

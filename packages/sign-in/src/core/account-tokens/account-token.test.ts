@@ -5,6 +5,7 @@ import { aSetup } from '../../../test/support/setup-fixtures.js';
 import { createAccess } from '../reconciliation/access.js';
 import { signInOfMaya } from '../../../test/support/sign-in-fixtures.js';
 import { createAccountToken } from './account-token.js';
+import { unavailable } from '../../../test/support/cleanup-outcomes.js';
 
 describe('a fresh fleet token for Maya', () => {
   it('refuses a new credential sign-in after disable and prevents an in-flight exchange restoring removed rights', async () => {
@@ -13,7 +14,7 @@ describe('a fresh fleet token for Maya', () => {
     const shared = await fixture.authenticate();
     const accountId = aSetup().secrets.accountId();
     const fleetId = aSetup().input.fleetId;
-    const access = createAccess({ identity: fixture.identity, secrets: aSetup().secrets, cleanup: { acknowledge: () => Promise.resolve(false) } });
+    const access = createAccess({ identity: fixture.identity, secrets: aSetup().secrets, cleanup: { acknowledge: () => Promise.resolve(unavailable) } });
     const reached = Promise.withResolvers<undefined>();
     const resume = Promise.withResolvers<undefined>();
     const token = createAccountToken({ ...fixture, now: () => fixture.now, issuer: 'https://signin.example.test', signer: { sign: () => Promise.resolve('must-not-be-issued') }, fleet: { async reconcile(input) {

@@ -8,6 +8,8 @@ import { createSetup } from '../../core/accounts/setup.js';
 import { createSignIn } from '../../core/sign-in/sign-in.js';
 import { createSignOut } from '../../core/sign-in/sign-out.js';
 import { openIdentity } from './identity.js';
+import { acknowledged as acknowledgedOutcome, pageReleased, personShipFound, unavailable as unavailableOutcome } from '../../../test/support/cleanup-outcomes.js';
+import { cleanupTargetIdSchema } from '../../core/shared/identity.js';
 
 let container: Awaited<ReturnType<PostgreSqlContainer['start']>>;
 let database: Awaited<ReturnType<typeof openIdentity>>;
@@ -115,7 +117,7 @@ describe('access cleanup durability', () => {
       if (right === null) throw new Error('Expected right');
       await records.saveRight({ ...right, personShipId: null });
     });
-    const access = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: (target) => Promise.resolve(target.kind === 'fleet' && target.personShipId === null ? { personShipId: 'shp_00000000000000000000000001' } : true) } });
+    const access = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: (target) => Promise.resolve(target.kind === 'fleet' && target.personShipId === null ? personShipFound('shp_00000000000000000000000001') : acknowledgedOutcome) } });
 
     // When removal resolves the original commission key and the service restarts.
     await access.remove({ accountId, fleetId: null });
@@ -126,7 +128,7 @@ describe('access cleanup durability', () => {
     // Then the mapping is durable and only subsequent cleanup can acknowledge the remaining fleet target.
     expect(await database.identity.transaction((records) => records.right({ accountId, fleetId: setup.input.fleetId }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001', scopes: [] });
     expect(await database.identity.transaction((records) => records.pendingCleanup(accountId))).toMatchObject({ personShipId: 'shp_00000000000000000000000001', kind: 'fleet' });
-    const retry = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(true) } });
+    const retry = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(acknowledgedOutcome) } });
     while ((await retry.reconcile()).kind === 'pending') { /* finish removal */ }
     expect(await retry.recover({ accountId, password: 'replacement-password', shouldEnable: true, fleetId: setup.input.fleetId })).toEqual({ kind: 'recovered' });
   });
@@ -140,12 +142,12 @@ describe('access cleanup durability', () => {
     if (original === null) throw new Error('Expected Maya');
     await expect(database.identity.transaction(async (records) => {
       await records.saveAccount({ ...original, isDisabled: true });
-      await records.saveCleanup({ id: 'rollback', attempts: 0, cursor: null, accountId, fleetId: null, personShipId: null, kind: 'cutOff', shouldReleaseOwnedTrierarchs: true });
+      await records.saveCleanup({ id: cleanupTargetIdSchema.parse('rollback'), attempts: 0, cursor: null, accountId, fleetId: null, personShipId: null, kind: 'cutOff', shouldReleaseOwnedTrierarchs: true });
       throw new Error('Interrupted removal');
     })).rejects.toThrow('Interrupted removal');
     expect(await database.identity.transaction((records) => records.pendingCleanup())).toBeNull();
     expect(await database.identity.transaction((records) => records.accountById(accountId))).toMatchObject({ isDisabled: false });
-    const unavailable = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(false) } });
+    const unavailable = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(unavailableOutcome) } });
 
     // When concurrent commands remove access and the service restarts before acknowledgement.
     await Promise.all([unavailable.remove({ accountId, fleetId: null }), unavailable.remove({ accountId, fleetId: null })]);
@@ -154,11 +156,11 @@ describe('access cleanup durability', () => {
     const interrupted = createAccess({ identity: { transaction: (work) => database.identity.transaction(async (records) => {
       await work(records);
       throw new Error('Lost acknowledgement transaction');
-    }) }, secrets: setup.secrets, cleanup: { acknowledge: (target) => { acknowledged.add(target.id); return Promise.resolve(true); } } });
+    }) }, secrets: setup.secrets, cleanup: { acknowledge: (target) => { acknowledged.add(target.id); return Promise.resolve(acknowledgedOutcome); } } });
     await expect(interrupted.reconcile()).rejects.toThrow('Lost acknowledgement transaction');
     await database.close();
     database = await openIdentity(container.getConnectionUri());
-    const restarted = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: (target) => { acknowledged.add(target.id); return Promise.resolve(true); } } });
+    const restarted = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: (target) => { acknowledged.add(target.id); return Promise.resolve(acknowledgedOutcome); } } });
     while ((await restarted.reconcile()).kind === 'pending') await Promise.all([restarted.reconcile(), restarted.reconcile()]);
 
     // Then all targets from both removals were retained, acknowledged, and recovery keeps the same mapping.
@@ -176,7 +178,7 @@ describe('protected identity backup restore', () => {
     const setup = aSetup();
     await createSetup({ identity: database.identity, fleet: fleetOfMaya(), secrets: setup.secrets }).establish(setup.input);
     const accountId = setup.secrets.accountId();
-    const access = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve({ cursor: 'saved-page' }) } });
+    const access = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(pageReleased('saved-page')) } });
     await access.remove({ accountId, fleetId: null });
     await access.reconcile();
     const dump = await container.exec(['pg_dump', '-U', container.getUsername(), '-d', container.getDatabase(), '-f', '/tmp/sign-in-backup.sql']);
@@ -201,7 +203,7 @@ describe('protected identity backup restore', () => {
       return targets.some((saved) => saved.cursor === 'saved-page');
     })).toBe(true);
     expect(target).not.toBeNull();
-    const retry = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(true) } });
+    const retry = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(acknowledgedOutcome) } });
     while ((await retry.reconcile()).kind === 'pending') { /* drain restored retry records */ }
 
     // Then acknowledgement completes without changing the account, person ship or ownership mapping.

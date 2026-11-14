@@ -1,5 +1,8 @@
 /** Installation identity records; rights and person mappings are fleet-scoped. */
 import type { AccountId, FleetId, ShipId } from '@aeolus-fleet/common';
+import { z } from 'zod';
+
+import type { Result } from './result.js';
 
 export interface Account {
   readonly id: AccountId;
@@ -25,7 +28,7 @@ export interface IdentityRecords {
   revokeSharedSignIns(accountId: AccountId): Promise<void>;
   pendingCleanup(accountId?: AccountId): Promise<CleanupTarget | null>;
   saveCleanup(target: CleanupTarget): Promise<void>;
-  deleteCleanup(id: string): Promise<void>;
+  deleteCleanup(id: CleanupTargetId): Promise<void>;
   hasAccounts(): Promise<boolean>;
   account(email: string): Promise<Account | null>;
   accountById(id: AccountId): Promise<Account | null>;
@@ -97,11 +100,15 @@ export interface SignInSecrets {
   verifyPassword(input: { password: string; hash: string | null }): Promise<boolean>;
 }
 
+/** One removal's target: account, access version, kind and fleet, so a retry saves the same target. */
+export const cleanupTargetIdSchema = z.string().min(1).brand<'CleanupTargetId'>();
+export type CleanupTargetId = z.infer<typeof cleanupTargetIdSchema>;
+
 /** Each removal target remains durable until the remote side acknowledges it. */
 export interface CleanupTarget {
   readonly attempts: number;
   readonly cursor: string | null;
-  readonly id: string;
+  readonly id: CleanupTargetId;
   readonly accountId: AccountId;
   readonly fleetId: FleetId | null;
   readonly personShipId: ShipId | null;
@@ -109,6 +116,15 @@ export interface CleanupTarget {
   readonly shouldReleaseOwnedTrierarchs: boolean;
 }
 
+/** What one attempt achieved: the whole target, one page of owned trierarchs, or the person ship found first. */
+export type CleanupProgress =
+  | { readonly kind: 'acknowledged' }
+  | { readonly kind: 'pageReleased'; readonly cursor: string }
+  | { readonly kind: 'personShipFound'; readonly personShipId: ShipId };
+
+/** The remote side did not acknowledge; the target stays pending for a retry. */
+export interface CleanupFailure { readonly kind: 'unavailable' }
+
 export interface AccessCleanup {
-  acknowledge(target: CleanupTarget): Promise<boolean | { readonly cursor: string } | { readonly personShipId: ShipId }>;
+  acknowledge(target: CleanupTarget): Promise<Result<CleanupProgress, CleanupFailure>>;
 }

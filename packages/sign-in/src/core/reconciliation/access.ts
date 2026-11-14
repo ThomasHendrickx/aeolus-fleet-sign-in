@@ -1,7 +1,8 @@
 /** Removal and its remote acknowledgements are serialised with recovery and issuance. */
 import type { AccountId, FleetId } from '@aeolus-fleet/common';
 
-import type { AccessCleanup, CleanupTarget, Identity, Secrets } from '../shared/identity.js';
+import { cleanupTargetIdSchema, type AccessCleanup, type CleanupFailure, type CleanupProgress, type CleanupTarget, type Identity, type Secrets } from '../shared/identity.js';
+import type { Result } from '../shared/result.js';
 
 export function createAccess(deps: { identity: Identity; secrets: Secrets; cleanup: AccessCleanup }) {
   return {
@@ -13,7 +14,7 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
       await records.saveAccount({ ...account, accessVersion, isDisabled: input.fleetId === null || account.isDisabled });
       await records.revokeSharedSignIns(account.id);
       const rights = await records.rights(account.id);
-      const save = (target: Omit<CleanupTarget, 'id' | 'accountId' | 'shouldReleaseOwnedTrierarchs' | 'attempts' | 'cursor'>) => records.saveCleanup({ ...target, attempts: 0, cursor: null, accountId: account.id, id: `${account.id}/${accessVersion}/${target.kind}/${target.fleetId ?? 'installation'}`, shouldReleaseOwnedTrierarchs: input.fleetId === null });
+      const save = (target: Omit<CleanupTarget, 'id' | 'accountId' | 'shouldReleaseOwnedTrierarchs' | 'attempts' | 'cursor'>) => records.saveCleanup({ ...target, attempts: 0, cursor: null, accountId: account.id, id: cleanupTargetIdSchema.parse(`${account.id}/${accessVersion}/${target.kind}/${target.fleetId ?? 'installation'}`), shouldReleaseOwnedTrierarchs: input.fleetId === null });
       if (input.fleetId === null) await save({ kind: 'cutOff', fleetId: null, personShipId: null });
       for (const right of rights.filter((right) => input.fleetId === null || right.fleetId === input.fleetId)) {
         await records.saveRight({ ...right, scopes: [], groupValues: [], isFleetManager: false });
@@ -26,18 +27,21 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
     reconcile: () => deps.identity.transaction(async (records) => {
       const target = await records.pendingCleanup();
       if (target === null) return { kind: 'complete' as const };
-      let outcome: Awaited<ReturnType<AccessCleanup['acknowledge']>>;
-      try { outcome = await deps.cleanup.acknowledge(target); }
-      catch { outcome = false; }
-      if (outcome === true) await records.deleteCleanup(target.id);
-      else {
-        const personShipId = typeof outcome === 'object' && 'personShipId' in outcome ? outcome.personShipId : target.personShipId;
-        if (personShipId !== target.personShipId && target.fleetId !== null) {
-          const right = await records.right({ accountId: target.accountId, fleetId: target.fleetId });
-          if (right === null) return { kind: 'pending' as const };
-          await records.saveRight({ ...right, personShipId });
+      const outcome = await acknowledge({ cleanup: deps.cleanup, target });
+      if (!outcome.isOk) { await records.saveCleanup({ ...target, attempts: target.attempts + 1 }); return { kind: 'pending' as const }; }
+      const progress = outcome.value;
+      switch (progress.kind) {
+        case 'acknowledged': await records.deleteCleanup(target.id); break;
+        case 'pageReleased': await records.saveCleanup({ ...target, attempts: target.attempts + 1, cursor: progress.cursor }); break;
+        case 'personShipFound': {
+          if (target.fleetId !== null) {
+            const right = await records.right({ accountId: target.accountId, fleetId: target.fleetId });
+            if (right === null) return { kind: 'pending' as const };
+            await records.saveRight({ ...right, personShipId: progress.personShipId });
+          }
+          await records.saveCleanup({ ...target, attempts: target.attempts + 1, personShipId: progress.personShipId });
+          break;
         }
-        await records.saveCleanup({ ...target, attempts: target.attempts + 1, personShipId, cursor: typeof outcome === 'object' && 'cursor' in outcome ? outcome.cursor : target.cursor });
       }
       return { kind: 'pending' as const };
     }),
@@ -57,4 +61,10 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
       });
     },
   };
+}
+
+/** A remote call that fails outright leaves the target pending, as an unacknowledged one does. */
+async function acknowledge(input: { cleanup: AccessCleanup; target: CleanupTarget }): Promise<Result<CleanupProgress, CleanupFailure>> {
+  try { return await input.cleanup.acknowledge(input.target); }
+  catch { return { isOk: false, error: { kind: 'unavailable' } }; }
 }

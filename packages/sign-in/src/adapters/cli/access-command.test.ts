@@ -6,6 +6,7 @@ import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
 import { createSetup } from '../../core/accounts/setup.js';
 import { createAccess } from '../../core/reconciliation/access.js';
 import { runAccessCommand } from './access-command.js';
+import { outcomeOf } from '../../../test/support/cleanup-outcomes.js';
 
 async function aCommand() {
   const identity = memoryIdentity();
@@ -13,7 +14,7 @@ async function aCommand() {
   await createSetup({ identity, secrets: setup.secrets, fleet: fleetOfMaya() }).establish(setup.input);
   const output: string[] = [];
   let shouldAcknowledge = false;
-  const access = createAccess({ identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(shouldAcknowledge) } });
+  const access = createAccess({ identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(outcomeOf(shouldAcknowledge)) } });
   const terminal = { isTerminal: true, prompt: () => Promise.resolve(''), privatePassword: () => Promise.resolve('replacement-password'), write: (line: string) => { output.push(line); } };
   const run = (args: readonly string[]) => runAccessCommand({ args, access, terminal, fleets: [{ id: setup.input.fleetId }] });
   return { run, output, terminal, identity, accountId: setup.secrets.accountId(), fleetId: setup.input.fleetId, available: () => { shouldAcknowledge = true; } };

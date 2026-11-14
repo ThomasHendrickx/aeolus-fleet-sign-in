@@ -2,9 +2,10 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 
-import type { CleanupTarget } from '../../core/shared/identity.js';
+import { cleanupTargetIdSchema, type CleanupTarget } from '../../core/shared/identity.js';
 import { aSetup } from '../../../test/support/setup-fixtures.js';
 import { createAccessCleanup } from './access-cleanup.js';
+import { acknowledged, unavailable } from '../../../test/support/cleanup-outcomes.js';
 
 describe('gateway cleanup notification', () => {
   it('authenticates the existing per-fleet notification and retains work until a valid acknowledgement', async () => {
@@ -20,18 +21,18 @@ describe('gateway cleanup notification', () => {
     });
     const url = await gateway.listen({ host: '127.0.0.1', port: 0 });
     const { input, secrets } = aSetup();
-    const target: CleanupTarget = { id: 'removal', attempts: 0, cursor: null, kind: 'gateway', accountId: secrets.accountId(), fleetId: input.fleetId, personShipId: null, shouldReleaseOwnedTrierarchs: true };
-    const cleanup = createAccessCleanup({ installationToken: 'test-installation', gateways: [{ id: input.fleetId, gatewayUrl: url }], core: { acknowledge: () => Promise.resolve(true) } });
+    const target: CleanupTarget = { id: cleanupTargetIdSchema.parse('removal'), attempts: 0, cursor: null, kind: 'gateway', accountId: secrets.accountId(), fleetId: input.fleetId, personShipId: null, shouldReleaseOwnedTrierarchs: true };
+    const cleanup = createAccessCleanup({ installationToken: 'test-installation', gateways: [{ id: input.fleetId, gatewayUrl: url }], core: { acknowledge: () => Promise.resolve(acknowledged) } });
     try {
       // When the same notification is retried, including after recreating the sender.
-      expect(await cleanup.acknowledge(target)).toBe(false);
+      expect(await cleanup.acknowledge(target)).toEqual(unavailable);
       shouldFail = false;
-      expect(await cleanup.acknowledge(target)).toBe(true);
-      expect(await cleanup.acknowledge(target)).toBe(true);
+      expect(await cleanup.acknowledge(target)).toEqual(acknowledged);
+      expect(await cleanup.acknowledge(target)).toEqual(acknowledged);
 
       // Then only the stable fleet/account pair is invalidated, and refused authentication never acknowledges.
       expect(invalidated).toEqual(new Set([JSON.stringify({ fleetId: input.fleetId, accountId: secrets.accountId() })]));
-      expect(await createAccessCleanup({ installationToken: 'wrong', gateways: [{ id: input.fleetId, gatewayUrl: url }], core: { acknowledge: () => Promise.resolve(true) } }).acknowledge(target)).toBe(false);
+      expect(await createAccessCleanup({ installationToken: 'wrong', gateways: [{ id: input.fleetId, gatewayUrl: url }], core: { acknowledge: () => Promise.resolve(acknowledged) } }).acknowledge(target)).toEqual(unavailable);
     } finally { await gateway.close(); }
   });
 });

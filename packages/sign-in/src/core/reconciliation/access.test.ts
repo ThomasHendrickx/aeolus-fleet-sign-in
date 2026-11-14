@@ -6,6 +6,7 @@ import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
 import { createSignIn } from '../sign-in/sign-in.js';
 import { createSetup } from '../accounts/setup.js';
 import { createAccess } from './access.js';
+import { acknowledged as acknowledgedOutcome, unavailable } from '../../../test/support/cleanup-outcomes.js';
 
 async function aRemoval() {
   const identity = memoryIdentity();
@@ -16,9 +17,9 @@ async function aRemoval() {
   const acknowledged = new Set<string>();
   let isUnavailable = true;
   const access = createAccess({ identity, secrets, cleanup: { acknowledge(target) {
-    if (isUnavailable) return Promise.resolve(false);
+    if (isUnavailable) return Promise.resolve(unavailable);
     acknowledged.add(`${target.kind}/${target.fleetId ?? 'installation'}`);
-    return Promise.resolve(true);
+    return Promise.resolve(acknowledgedOutcome);
   } } });
   return { identity, access, accountId, fleetId: setup.input.fleetId, acknowledged, available: () => { isUnavailable = false; } };
 }
@@ -42,9 +43,9 @@ describe('durable access removal and recovery', () => {
     const given = await aRemoval();
     const gateway = new Set<string>();
     const access = createAccess({ identity: given.identity, secrets: aSetup().secrets, cleanup: { acknowledge: (target) => {
-      if (target.kind !== 'gateway') return Promise.resolve(false);
+      if (target.kind !== 'gateway') return Promise.resolve(unavailable);
       gateway.add(target.accountId);
-      return Promise.resolve(true);
+      return Promise.resolve(acknowledgedOutcome);
     } } });
 
     // When the worker retries a bounded batch.
