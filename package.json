@@ -23,6 +23,7 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run --project '*:unit'"
   }
 }
