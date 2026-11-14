@@ -25,9 +25,9 @@ export interface IdentityRecords {
   saveAccount(account: Account): Promise<void>;
   right(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight | null>;
   saveRight(right: FleetRight): Promise<void>;
-  session(hash: string): Promise<SharedSignIn | null>;
-  saveSession(input: { hash: string; session: SharedSignIn }): Promise<void>;
-  deleteSession(hash: string): Promise<void>;
+  sharedSignIn(hash: string): Promise<SharedSignIn | null>;
+  saveSharedSignIn(input: { hash: string; sharedSignIn: SharedSignIn }): Promise<void>;
+  deleteSharedSignIn(hash: string): Promise<void>;
   authorization(hash: string): Promise<Authorization | null>;
   saveAuthorization(input: { hash: string; authorization: Authorization }): Promise<void>;
   deleteAuthorization(hash: string): Promise<void>;

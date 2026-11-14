@@ -60,7 +60,7 @@ describe('durable identity across rollback concurrency and restart', () => {
     const restarted = createSignIn({ ...options, identity: database.identity });
     const results = await Promise.all([1, 2].map(() => restarted.redeem({ code: authorized.code, clientId: 'console', redirectUri: 'https://console.example.test/sign-in/done', verifier: 'verifier' })));
 
-    // Then the code succeeds only once, and both the session and credential refusal remain durable.
+    // Then the code succeeds only once, and both the shared sign-in and credential refusal remain durable.
     expect(results.map((result) => result.kind).sort()).toEqual(['invalidGrant', 'redeemed']);
     expect((await restarted.account(authenticated.signIn)).kind).toBe('account');
     expect(await restarted.authenticate({ email: original.email, password: 'private-password', address: 'address' })).toEqual({ kind: 'tooManyAttempts', retryAt: 900_000 });

@@ -4,7 +4,7 @@ import type { Authorization, FailedAttempts, Identity, IdentityRecords, SignInSe
 const ATTEMPT_WINDOW = 15 * 60 * 1000;
 const ACCOUNT_FAILURES = 5;
 const ADDRESS_FAILURES = 20;
-const SESSION_LIFE = 12 * 60 * 60 * 1000;
+const SHARED_SIGN_IN_LIFE = 12 * 60 * 60 * 1000;
 const FLOW_LIFE = 10 * 60 * 1000;
 
 export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets; now: () => number }) {
@@ -12,7 +12,7 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
   const transaction = deps.identity.transaction.bind(deps.identity);
 
   async function accountIn(records: IdentityRecords, hash: string) {
-    const held = await records.session(hash);
+    const held = await records.sharedSignIn(hash);
     if (held === null || held.expiresAt <= deps.now()) return null;
     return records.accountById(held.accountId);
   }
@@ -38,8 +38,8 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
           return refusedUntil > now ? { kind: 'tooManyAttempts' as const, retryAt: refusedUntil } : { kind: 'wrongCredential' as const };
         }
         const signIn = deps.secrets.token();
-        const expiresAt = now + SESSION_LIFE;
-        await records.saveSession({ hash: await digest(signIn), session: { accountId: account.id, expiresAt } });
+        const expiresAt = now + SHARED_SIGN_IN_LIFE;
+        await records.saveSharedSignIn({ hash: await digest(signIn), sharedSignIn: { accountId: account.id, expiresAt } });
         return { kind: 'authenticated' as const, signIn, expiresAt };
       });
     },
@@ -85,7 +85,7 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       });
     },
     async revoke(signIn: string) {
-      return transaction(async (records) => records.deleteSession(await digest(signIn)));
+      return transaction(async (records) => records.deleteSharedSignIn(await digest(signIn)));
     },
   };
 }

@@ -31,10 +31,10 @@ describe('a fresh fleet token for Maya', () => {
 
     // When the fleet is unknown, the sign-in is absent, or provisioning is inaccessible.
     expect(await token({ signIn: shared.signIn, fleetId: 'flt_00000000000000000000000002' })).toEqual({ kind: 'noRights' });
-    expect(await token({ signIn: 'not-a-session', fleetId: 'flt_00000000000000000000000001' })).toEqual({ kind: 'signedOut' });
+    expect(await token({ signIn: 'not-a-shared-sign-in', fleetId: 'flt_00000000000000000000000001' })).toEqual({ kind: 'signedOut' });
     fixture.fleet.shouldLoseConfirmation = true;
 
-    // Then only the service failure is unavailable, never a credential error or operator session.
+    // Then only the service failure is unavailable, never a credential error or argo access.
     expect(await token({ signIn: shared.signIn, fleetId: 'flt_00000000000000000000000001' })).toEqual({ kind: 'unavailable' });
   });
 });

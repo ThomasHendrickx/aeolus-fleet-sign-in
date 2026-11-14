@@ -6,16 +6,16 @@ import type { Account, Authorization, AuthorizationCode, FailedAttempts, FleetRi
 export function memoryIdentity() {
   const accounts = new Map<string, Account>();
   const rights = new Map<string, FleetRight>();
-  const sessions = new Map<string, SharedSignIn>();
+  const sharedSignIns = new Map<string, SharedSignIn>();
   const authorizations = new Map<string, Authorization>();
   const codes = new Map<string, AuthorizationCode>();
   const attempts = new Map<string, FailedAttempts>();
   let previous: Promise<unknown> = Promise.resolve();
   const records: IdentityRecords = {
     hasAccounts: () => Promise.resolve(accounts.size > 0),
-    session: (hash) => Promise.resolve(sessions.get(hash) ?? null),
-    saveSession: ({ hash, session }) => { sessions.set(hash, session); return Promise.resolve(); },
-    deleteSession: (hash) => { sessions.delete(hash); return Promise.resolve(); },
+    sharedSignIn: (hash) => Promise.resolve(sharedSignIns.get(hash) ?? null),
+    saveSharedSignIn: ({ hash, sharedSignIn }) => { sharedSignIns.set(hash, sharedSignIn); return Promise.resolve(); },
+    deleteSharedSignIn: (hash) => { sharedSignIns.delete(hash); return Promise.resolve(); },
     authorization: (hash) => Promise.resolve(authorizations.get(hash) ?? null),
     saveAuthorization: ({ hash, authorization }) => { authorizations.set(hash, authorization); return Promise.resolve(); },
     deleteAuthorization: (hash) => { authorizations.delete(hash); return Promise.resolve(); },
@@ -31,13 +31,13 @@ export function memoryIdentity() {
     saveRight: (right) => { rights.set(`${right.fleetId}/${right.accountId}`, right); return Promise.resolve(); },
   };
   return {
-    accounts, rights, sessions, authorizations, codes, attempts,
+    accounts, rights, sharedSignIns, authorizations, codes, attempts,
     async transaction<T>(work: (records: IdentityRecords) => Promise<T>): Promise<T> {
       const held = previous;
       const released = Promise.withResolvers<undefined>();
       previous = released.promise;
       await held;
-      const savedSessions = new Map(sessions);
+      const savedSharedSignIns = new Map(sharedSignIns);
       const savedAuthorizations = new Map(authorizations);
       const savedCodes = new Map(codes);
       const savedAttempts = new Map(attempts);
@@ -45,7 +45,7 @@ export function memoryIdentity() {
       const savedRights = new Map(rights);
       try { return await work(records); }
       catch (error) {
-        sessions.clear(); savedSessions.forEach((value, key) => sessions.set(key, value));
+        sharedSignIns.clear(); savedSharedSignIns.forEach((value, key) => sharedSignIns.set(key, value));
         authorizations.clear(); savedAuthorizations.forEach((value, key) => authorizations.set(key, value));
         codes.clear(); savedCodes.forEach((value, key) => codes.set(key, value));
         attempts.clear(); savedAttempts.forEach((value, key) => attempts.set(key, value));

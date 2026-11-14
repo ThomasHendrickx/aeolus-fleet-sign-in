@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { Account, FleetRight, Identity, IdentityRecords } from '../../core/shared/identity.js';
 import { PrismaClient, type Prisma } from './generated/client.js';
 
-const sessionSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number() });
+const sharedSignInSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number() });
 const authorizationSchema = z.object({ clientId: z.string(), redirectUri: z.string(), state: z.string(), codeChallenge: z.string(), browser: z.string(), expiresAt: z.number() });
 const codeSchema = z.object({ clientId: z.string(), redirectUri: z.string(), codeChallenge: z.string(), signInHash: z.string(), expiresAt: z.number() });
 const attemptsSchema = z.object({ failures: z.array(z.number()), refusedUntil: z.number() });
@@ -41,9 +41,9 @@ function recordsOf(client: Prisma.TransactionClient): IdentityRecords {
       const data = { ...right, scopes: [...right.scopes], groupValues: [...right.groupValues] };
       await client.fleetRight.upsert({ where: { fleetId_accountId: { fleetId: right.fleetId, accountId: right.accountId } }, create: data, update: data });
     },
-    session: async (hash) => nullable(sessionSchema, await load(`session/${hash}`)),
-    saveSession: ({ hash, session }) => save(`session/${hash}`, { ...session }),
-    deleteSession: (hash) => remove(`session/${hash}`),
+    sharedSignIn: async (hash) => nullable(sharedSignInSchema, await load(`shared-sign-in/${hash}`)),
+    saveSharedSignIn: ({ hash, sharedSignIn }) => save(`shared-sign-in/${hash}`, { ...sharedSignIn }),
+    deleteSharedSignIn: (hash) => remove(`shared-sign-in/${hash}`),
     authorization: async (hash) => nullable(authorizationSchema, await load(`authorization/${hash}`)),
     saveAuthorization: ({ hash, authorization }) => save(`authorization/${hash}`, { ...authorization }),
     deleteAuthorization: (hash) => remove(`authorization/${hash}`),

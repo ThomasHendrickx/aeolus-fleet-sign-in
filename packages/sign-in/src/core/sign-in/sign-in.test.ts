@@ -1,4 +1,4 @@
-/** Approved credential limits, fixed session lifetime and one-use browser-bound code/PKCE. */
+/** Approved credential limits, fixed shared sign-in lifetime and one-use browser-bound code/PKCE. */
 import { describe, expect, it } from 'vitest';
 
 import { signInOfMaya } from '../../../test/support/sign-in-fixtures.js';
