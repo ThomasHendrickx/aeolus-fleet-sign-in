@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { Account, FleetRight, Identity, IdentityRecords } from '../../core/shared/identity.js';
 import { PrismaClient, type Prisma } from './generated/client.js';
 
-const sharedSignInSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number() });
+const sharedSignInSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number(), revokedAt: z.number().optional() });
 const authorizationSchema = z.object({ clientId: z.string(), redirectUri: z.string(), state: z.string(), codeChallenge: z.string(), browser: z.string(), expiresAt: z.number() });
 const codeSchema = z.object({ clientId: z.string(), redirectUri: z.string(), codeChallenge: z.string(), signInHash: z.string(), expiresAt: z.number() });
 /** One advisory lock key serialises this installation's identity transitions and migrations. */

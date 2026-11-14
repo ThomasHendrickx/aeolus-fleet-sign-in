@@ -84,7 +84,7 @@ describe('durable identity across rollback concurrency and restart', () => {
     })).rejects.toThrow('Rollback sign-out');
     expect((await signIn.account(shared.signIn)).kind).toBe('account');
     fleet.shouldFailSignOut = true;
-    const signOut = createSignOut({ signIn, sessions: fleet });
+    const signOut = createSignOut({ signIn, sessions: fleet, log: () => undefined });
 
     // When concurrent sign-outs commit locally, fail remotely, and the service restarts.
     expect(await Promise.all([signOut(shared.signIn), signOut(shared.signIn)])).toEqual([{ kind: 'unavailable' }, { kind: 'unavailable' }]);
@@ -95,9 +95,9 @@ describe('durable identity across rollback concurrency and restart', () => {
 
     // Then neither app can use the shared sign-in, while retry still resolves its original account for core.
     expect(await restarted.account(shared.signIn)).toEqual({ kind: 'signedOut' });
-    expect(await createSignOut({ signIn: restarted, sessions: fleet })(shared.signIn)).toEqual({ kind: 'signedOut' });
+    expect(await createSignOut({ signIn: restarted, sessions: fleet, log: () => undefined })(shared.signIn)).toEqual({ kind: 'signedOut' });
     expect(fleet.signedOutAccounts).toEqual(new Set(['maya-opaque-account']));
-    expect(await database.identity.transaction((records) => records.sharedSignIn(hash))).toEqual({ accountId: 'maya-opaque-account', expiresAt: 0 });
+    expect(await database.identity.transaction((records) => records.sharedSignIn(hash))).toEqual({ accountId: 'maya-opaque-account', expiresAt: 0, revokedAt: 900_000 });
   });
 
 });
