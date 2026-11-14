@@ -24,7 +24,7 @@ describe('trusted server setup', () => {
     // When the command establishes Maya on the existing fleet.
     const status = await runSetup({ fleetId: aSetup().input.fleetId, terminal, setup: (input) => {
       established.set(input.email, input.password);
-      return Promise.resolve({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' });
+      return Promise.resolve({ kind: 'ready', accountId: aSetup().secrets.accountId(), personShipId: 'shp_00000000000000000000000001' });
     } });
 
     // Then input reached the setup boundary but never appeared in terminal output.

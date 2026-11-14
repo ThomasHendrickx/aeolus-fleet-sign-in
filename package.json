@@ -28,6 +28,9 @@
     "typecheck": "tsc --project tsconfig.json && tsc --project packages/sign-in/tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run",
-    "test:unit": "vitest run --project '*:unit'"
+    "test:unit": "vitest run --project '*:unit'",
+    "generate": "prisma generate",
+    "build": "npm run generate && npm run build -w packages/sign-in",
+    "postinstall": "prisma generate"
   }
 }

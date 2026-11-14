@@ -23,5 +23,15 @@
     "jose": "^6.2.17",
     "pg": "^8.23.1",
     "zod": "^4.6.7"
+  },
+  "bin": {
+    "aeolus-sign-in": "dist/bin/aeolus-sign-in.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json && cp -R src/adapters/http/assets dist/adapters/http/ && cp -R src/adapters/prisma/migrations dist/adapters/prisma/",
+    "start": "node dist/bin/aeolus-sign-in.js serve"
   }
 }
