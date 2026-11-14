@@ -85,10 +85,11 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
   });
   server.post('/oauth/token', async (request, reply) => {
     const fields = fieldsSchema.safeParse(request.body);
-    if (!fields.success || !clientOf(request, { config, fields: fields.data })) return reply.code(401).send({ error: 'invalid_client' });
+    const authenticated = fields.success ? clientOf(request, { config, fields: fields.data }) : null;
+    if (!fields.success || authenticated === null) return reply.code(401).send({ error: 'invalid_client' });
     const form = fields.data;
     if (form.grant_type === 'authorization_code') {
-      const redeemed = await signIn.redeem({ code: form.code ?? '', clientId: form.client_id ?? '', redirectUri: form.redirect_uri ?? '', verifier: form.code_verifier ?? '' });
+      const redeemed = await signIn.redeem({ code: form.code ?? '', clientId: authenticated.id, redirectUri: form.redirect_uri ?? '', verifier: form.code_verifier ?? '' });
       return redeemed.kind === 'redeemed' ? { token_type: 'Bearer' } : reply.code(400).send({ error: 'invalid_grant' });
     }
     if (form.grant_type !== 'urn:ietf:params:oauth:grant-type:token-exchange' || form.subject_token_type !== 'urn:aeolus:params:oauth:token-type:sign-in') return reply.code(400).send({ error: 'unsupported_grant_type' });
@@ -103,7 +104,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     }
   });
   server.get('/api/apps', async (request, reply) => {
-    if (!clientOf(request, { config, fields: {} })) return reply.code(401).send({ error: 'invalid_client' });
+    if (clientOf(request, { config, fields: {} }) === null) return reply.code(401).send({ error: 'invalid_client' });
     const shared = await signIn.account(headerOf(request, 'aeolus-sign-in'));
     if (shared.kind === 'signedOut') return reply.code(401).send({ error: 'invalid_grant' });
     const rights = await deps.identity.transaction((records) => Promise.all(config.fleets.map(async (fleet) => ({ fleet, right: await records.right({ accountId: shared.account.id, fleetId: fleet.id }) }))));
@@ -111,7 +112,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
   });
   server.post('/oauth/revoke', async (request, reply) => {
     const fields = fieldsSchema.safeParse(request.body);
-    if (!fields.success || !clientOf(request, { config, fields: fields.data })) return reply.code(401).send({ error: 'invalid_client' });
+    if (!fields.success || clientOf(request, { config, fields: fields.data }) === null) return reply.code(401).send({ error: 'invalid_client' });
     await signIn.revoke(fields.data.token ?? '');
     return {};
   });
@@ -142,17 +143,18 @@ function invalidConfiguration(reply: FastifyReply) {
   return reply.code(400).type('text/html').send(refusalPage({ heading: 'Sign-in configuration needs attention', text: 'This sign-in cannot continue. Ask the person who runs this installation to check its settings.' }));
 }
 
-function clientOf(request: FastifyRequest, input: { config: ServiceConfig; fields: Record<string, string> }): boolean {
+/** The registered client that authenticated by Basic or form credentials, or null. */
+function clientOf(request: FastifyRequest, input: { config: ServiceConfig; fields: Record<string, string> }): ServiceConfig['clients'][number] | null {
   let id = input.fields.client_id;
   let secret = input.fields.client_secret;
   const authorization = headerOf(request, 'authorization');
   if (authorization.startsWith(BASIC_PREFIX)) {
     const decoded = Buffer.from(authorization.slice(BASIC_PREFIX.length), 'base64').toString();
     const separator = decoded.indexOf(':');
-    if (separator < 0) return false;
-    try { id = decodeURIComponent(decoded.slice(0, separator)); secret = decodeURIComponent(decoded.slice(separator + 1)); } catch { return false; }
+    if (separator < 0) return null;
+    try { id = decodeURIComponent(decoded.slice(0, separator)); secret = decodeURIComponent(decoded.slice(separator + 1)); } catch { return null; }
   }
   const client = input.config.clients.find((candidate) => candidate.id === id);
-  if (client === undefined || secret === undefined) return false;
-  return timingSafeEqual(createHash('sha256').update(client.secret).digest(), createHash('sha256').update(secret).digest());
+  if (client === undefined || secret === undefined) return null;
+  return timingSafeEqual(createHash('sha256').update(client.secret).digest(), createHash('sha256').update(secret).digest()) ? client : null;
 }
