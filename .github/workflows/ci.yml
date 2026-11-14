@@ -89,3 +89,11 @@ jobs:
       - run: npm ci
       - run: npm exec playwright install --with-deps chromium
       - run: npm test -- --project sign-in:browser --reporter verbose
+
+  image:
+    name: Runnable sign-in image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker buildx build --load --tag aeolus-sign-in:check .
+      - run: docker run --rm --pids-limit=128 aeolus-sign-in:check keygen --file /tmp/sign-in-smoke.pem
