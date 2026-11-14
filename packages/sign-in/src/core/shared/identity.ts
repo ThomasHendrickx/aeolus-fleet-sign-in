@@ -24,6 +24,17 @@ export interface IdentityRecords {
   saveAccount(account: Account): Promise<void>;
   right(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight | null>;
   saveRight(right: FleetRight): Promise<void>;
+  session(hash: string): Promise<SharedSignIn | null>;
+  saveSession(input: { hash: string; session: SharedSignIn }): Promise<void>;
+  deleteSession(hash: string): Promise<void>;
+  authorization(hash: string): Promise<Authorization | null>;
+  saveAuthorization(input: { hash: string; authorization: Authorization }): Promise<void>;
+  deleteAuthorization(hash: string): Promise<void>;
+  code(hash: string): Promise<AuthorizationCode | null>;
+  saveCode(input: { hash: string; code: AuthorizationCode }): Promise<void>;
+  deleteCode(hash: string): Promise<void>;
+  attempts(key: string): Promise<FailedAttempts | null>;
+  saveAttempts(input: { key: string; attempts: FailedAttempts }): Promise<void>;
 }
 
 export interface Identity {
@@ -39,4 +50,38 @@ export interface Secrets {
 export interface PersonFleets {
   /** Reconciles every offered scope and the existing person installation commission key. */
   reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight>;
+}
+
+export interface SharedSignIn {
+  readonly accountId: AccountId;
+  readonly expiresAt: number;
+}
+
+export interface Authorization {
+  readonly clientId: string;
+  readonly redirectUri: string;
+  readonly state: string;
+  readonly codeChallenge: string;
+  readonly browser: string;
+  readonly expiresAt: number;
+}
+
+export interface AuthorizationCode {
+  readonly clientId: string;
+  readonly redirectUri: string;
+  readonly codeChallenge: string;
+  readonly signInHash: string;
+  readonly expiresAt: number;
+}
+
+export interface FailedAttempts {
+  readonly since: number;
+  readonly failures: number;
+  readonly refusedUntil: number;
+}
+
+export interface SignInSecrets {
+  token(): string;
+  digest(value: string): Promise<string>;
+  verifyPassword(input: { password: string; hash: string | null }): Promise<boolean>;
 }

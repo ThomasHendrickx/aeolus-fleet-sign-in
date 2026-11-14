@@ -58,14 +58,16 @@ describe('Maya signs in to her local account', () => {
     // When another browser or verifier tries the same flow/code.
     expect(await fixture.signIn.complete({ flow: flow.flow, browser: 'another-browser', signIn: authenticated.signIn })).toEqual({ kind: 'invalidFlow' });
     const completed = await fixture.signIn.complete({ flow: flow.flow, browser: request.browser, signIn: authenticated.signIn });
-    if (completed.kind !== 'authorized') throw new Error('Expected authorized code');
+    expect(completed.kind).toBe('authorized');
+    if (completed.kind !== 'authorized') return;
     const redemption = { code: completed.code, clientId: request.clientId, redirectUri: request.redirectUri, verifier: 'wrong' };
     expect(await fixture.signIn.redeem(redemption)).toEqual({ kind: 'invalidGrant' });
 
     // Then a new code with its own verifier succeeds only once, including concurrent redemption.
     const next = await fixture.signIn.begin(request);
     const authorized = await fixture.signIn.complete({ flow: next.flow, browser: request.browser, signIn: authenticated.signIn });
-    if (authorized.kind !== 'authorized') throw new Error('Expected authorized code');
+    expect(authorized.kind).toBe('authorized');
+    if (authorized.kind !== 'authorized') return;
     const results = await Promise.all([1, 2].map(() => fixture.signIn.redeem({ ...redemption, code: authorized.code, verifier: 'verifier' })));
     expect(results.map((result) => result.kind).sort()).toEqual(['invalidGrant', 'redeemed']);
     expect(await fixture.signIn.complete({ flow: next.flow, browser: request.browser, signIn: authenticated.signIn })).toEqual({ kind: 'invalidFlow' });
