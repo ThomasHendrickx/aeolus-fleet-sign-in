@@ -1,8 +1,6 @@
 /** Wires pure identity use cases to the existing console and gateway HTTP contract. */
 import { readFile } from 'node:fs/promises';
-import { createHash, timingSafeEqual } from 'node:crypto';
 
-import { idSchema } from '@aeolus-fleet/common';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -13,6 +11,8 @@ import type { Identity, PersonFleets } from './core/shared/identity.js';
 import { serviceConfigSchema, type ServiceConfig } from './config.js';
 import type { createSecrets } from './adapters/crypto/secrets.js';
 import type { createSigner } from './adapters/crypto/signer.js';
+import { clientOf } from './adapters/http/client-authentication.js';
+import { tokenRequestOf } from './adapters/http/token-request.js';
 import { credentialPage, refusalPage, signInStyles } from './adapters/http/pages.js';
 
 const sharedCookie = 'aeolus_account_session';
@@ -21,10 +21,9 @@ const browserCookie = 'aeolus_sign_in_browser';
 const BROWSER_BINDING_SECONDS = 600;
 const BODY_LIMIT_BYTES = 16_384;
 const REQUEST_TIMEOUT_MS = 15_000;
-const BASIC_PREFIX = 'Basic ';
 const authorizeSchema = z.object({ response_type: z.literal('code'), client_id: z.string(), redirect_uri: z.url(), state: z.string().min(1).max(1024), code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code_challenge_method: z.literal('S256') });
 const credentialSchema = z.object({ flow: z.string().min(1).max(256), email: z.email().max(320), password: z.string().min(1).max(1024) });
-const fieldsSchema = z.record(z.string(), z.string());
+const revokeRequestSchema = z.object({ token: z.string().min(1).max(4096) });
 const script = await readFile(new URL('./adapters/http/assets/sign-in.js', import.meta.url), 'utf8');
 
 export function createService(deps: { identity: Identity; fleet: PersonFleets; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number }) {
@@ -84,36 +83,38 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     return request.headers.accept?.includes('application/json') ? { kind: 'authorized', redirect: callbackOf(completed) } : reply.code(303).header('location', callbackOf(completed)).send();
   });
   server.post('/oauth/token', async (request, reply) => {
-    const fields = fieldsSchema.safeParse(request.body);
-    const authenticated = fields.success ? clientOf(request, { config, fields: fields.data }) : null;
-    if (!fields.success || authenticated === null) return reply.code(401).send({ error: 'invalid_client' });
-    const form = fields.data;
-    if (form.grant_type === 'authorization_code') {
-      const redeemed = await signIn.redeem({ code: form.code ?? '', clientId: authenticated.id, redirectUri: form.redirect_uri ?? '', verifier: form.code_verifier ?? '' });
-      return redeemed.kind === 'redeemed' ? { token_type: 'Bearer' } : reply.code(400).send({ error: 'invalid_grant' });
-    }
-    if (form.grant_type !== 'urn:ietf:params:oauth:grant-type:token-exchange' || form.subject_token_type !== 'urn:aeolus:params:oauth:token-type:sign-in') return reply.code(400).send({ error: 'unsupported_grant_type' });
-    const fleet = idSchema('fleet').safeParse(form.resource);
-    if (!fleet.success) return reply.code(400).send({ error: 'invalid_target' });
-    const exchanged = await token({ signIn: form.subject_token ?? '', fleetId: fleet.data });
-    switch (exchanged.kind) {
-      case 'token': return { access_token: exchanged.token, token_type: 'Bearer', expires_in: exchanged.expiresIn };
-      case 'signedOut': return reply.code(400).send({ error: 'invalid_grant' });
-      case 'noRights': return reply.code(400).send({ error: 'invalid_target' });
-      case 'unavailable': return reply.code(503).send({ error: 'temporarily_unavailable' });
+    const authenticated = clientOf(request, config);
+    if (authenticated === null) return reply.code(401).send({ error: 'invalid_client' });
+    const tokenRequest = tokenRequestOf(request.body);
+    switch (tokenRequest.kind) {
+      case 'refused': return reply.code(400).send({ error: tokenRequest.error });
+      case 'authorizationCode': {
+        const redeemed = await signIn.redeem({ code: tokenRequest.code, clientId: authenticated.id, redirectUri: tokenRequest.redirectUri, verifier: tokenRequest.verifier });
+        return redeemed.kind === 'redeemed' ? { token_type: 'Bearer' } : reply.code(400).send({ error: 'invalid_grant' });
+      }
+      case 'tokenExchange': {
+        const exchanged = await token({ signIn: tokenRequest.signIn, fleetId: tokenRequest.fleetId });
+        switch (exchanged.kind) {
+          case 'token': return { access_token: exchanged.token, token_type: 'Bearer', expires_in: exchanged.expiresIn };
+          case 'signedOut': return reply.code(400).send({ error: 'invalid_grant' });
+          case 'noRights': return reply.code(400).send({ error: 'invalid_target' });
+          case 'unavailable': return reply.code(503).send({ error: 'temporarily_unavailable' });
+        }
+      }
     }
   });
   server.get('/api/apps', async (request, reply) => {
-    if (clientOf(request, { config, fields: {} }) === null) return reply.code(401).send({ error: 'invalid_client' });
+    if (clientOf(request, config) === null) return reply.code(401).send({ error: 'invalid_client' });
     const shared = await signIn.account(headerOf(request, 'aeolus-sign-in'));
     if (shared.kind === 'signedOut') return reply.code(401).send({ error: 'invalid_grant' });
     const rights = await deps.identity.transaction((records) => Promise.all(config.fleets.map(async (fleet) => ({ fleet, right: await records.right({ accountId: shared.account.id, fleetId: fleet.id }) }))));
     return { account: { id: shared.account.id, email: shared.account.email, firstName: shared.account.displayName }, apps: [], fleets: rights.filter(({ right }) => right !== null && right.scopes.length > 0).map(({ fleet }) => ({ id: fleet.id, name: fleet.name, argo: false, apps: [{ app: 'console', url: fleet.consoleUrl }, { app: 'gateway', url: fleet.gatewayUrl }] })) };
   });
   server.post('/oauth/revoke', async (request, reply) => {
-    const fields = fieldsSchema.safeParse(request.body);
-    if (!fields.success || clientOf(request, { config, fields: fields.data }) === null) return reply.code(401).send({ error: 'invalid_client' });
-    await signIn.revoke(fields.data.token ?? '');
+    if (clientOf(request, config) === null) return reply.code(401).send({ error: 'invalid_client' });
+    const revoked = revokeRequestSchema.safeParse(request.body);
+    if (!revoked.success) return reply.code(400).send({ error: 'invalid_request' });
+    await signIn.revoke(revoked.data.token);
     return {};
   });
   return { server, setup, signIn };
@@ -141,20 +142,4 @@ function callbackOf(input: { redirectUri: string; state: string; code: string })
 
 function invalidConfiguration(reply: FastifyReply) {
   return reply.code(400).type('text/html').send(refusalPage({ heading: 'Sign-in configuration needs attention', text: 'This sign-in cannot continue. Ask the person who runs this installation to check its settings.' }));
-}
-
-/** The registered client that authenticated by Basic or form credentials, or null. */
-function clientOf(request: FastifyRequest, input: { config: ServiceConfig; fields: Record<string, string> }): ServiceConfig['clients'][number] | null {
-  let id = input.fields.client_id;
-  let secret = input.fields.client_secret;
-  const authorization = headerOf(request, 'authorization');
-  if (authorization.startsWith(BASIC_PREFIX)) {
-    const decoded = Buffer.from(authorization.slice(BASIC_PREFIX.length), 'base64').toString();
-    const separator = decoded.indexOf(':');
-    if (separator < 0) return null;
-    try { id = decodeURIComponent(decoded.slice(0, separator)); secret = decodeURIComponent(decoded.slice(separator + 1)); } catch { return null; }
-  }
-  const client = input.config.clients.find((candidate) => candidate.id === id);
-  if (client === undefined || secret === undefined) return null;
-  return timingSafeEqual(createHash('sha256').update(client.secret).digest(), createHash('sha256').update(secret).digest()) ? client : null;
 }
