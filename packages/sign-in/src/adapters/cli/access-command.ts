@@ -1,11 +1,10 @@
 /** Server authority removes access durably; recovery reads credentials only from a private terminal. */
-import { accountIdSchema, idSchema, type FleetId } from '@aeolus-fleet/common';
+import { accountIdSchema, idSchema, type AccountId, type FleetId } from '@aeolus-fleet/common';
 
 import { MINIMUM_PASSWORD_LENGTH } from '../../core/accounts/password.js';
 import type { createAccess } from '../../core/reconciliation/access.js';
 import type { PrivateTerminal } from './setup-command.js';
 
-const CLEANUP_BATCH = 3;
 const MAXIMUM_PASSWORD_LENGTH = 1024;
 const commandFailure = 'Sign-in could not complete. Check the command and its server configuration; no access was granted.';
 const notFound = 'Account identity was not found. Check the account id and retry.';
@@ -15,7 +14,7 @@ export async function runAccessCommand(input: { args: readonly string[]; fleets:
   const [command, ...args] = input.args;
   if (command === 'reconcile' && args.length === 0) {
     terminal.write('Retrying saved cleanup.');
-    return reconcile({ terminal, access });
+    return reconcile({ terminal, access, accountId: null });
   }
   const flags = flagsOf(args);
   const parsed = accountIdSchema.safeParse(flags?.get('--account'));
@@ -47,7 +46,7 @@ export async function runAccessCommand(input: { args: readonly string[]; fleets:
   terminal.write('Access removal saved. New account tokens are refused.');
   terminal.write('Shared sign-ins revoked.');
   terminal.write(command === 'disable' ? 'Account disabled; cleanup is pending.' : 'Fleet rights removed; cleanup is pending.');
-  return reconcile({ terminal, access });
+  return reconcile({ terminal, access, accountId: parsed.data });
 }
 
 function flagsOf(args: readonly string[]): Map<string, string> | null {
@@ -63,9 +62,11 @@ function flagsOf(args: readonly string[]): Map<string, string> | null {
   return flags;
 }
 
-async function reconcile(input: { terminal: PrivateTerminal; access: ReturnType<typeof createAccess> }): Promise<number> {
-  for (let index = 0; index < CLEANUP_BATCH; index += 1) if ((await input.access.reconcile()).kind === 'complete') break;
-  if (await input.access.hasPending()) { input.terminal.write('Cleanup is still pending. Check the server configuration and retry reconciliation.'); return 1; }
+/** Keeps reconciling while each attempt makes progress; a removal command reconciles and reports only its own account. */
+async function reconcile(input: { terminal: PrivateTerminal; access: ReturnType<typeof createAccess>; accountId: AccountId | null }): Promise<number> {
+  const accountId = input.accountId ?? undefined;
+  while ((await input.access.reconcile(accountId)).kind === 'pending') { /* the next target, or the next page of this one */ }
+  if (await input.access.hasPending(accountId)) { input.terminal.write('Cleanup is still pending. Check the server configuration and retry reconciliation.'); return 1; }
   input.terminal.write('No pending cleanup remains.');
   input.terminal.write('Access removal complete. Person ship history and ownership are retained.');
   return 0;

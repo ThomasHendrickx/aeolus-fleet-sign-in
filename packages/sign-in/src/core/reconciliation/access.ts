@@ -6,7 +6,7 @@ import type { Result } from '../shared/result.js';
 
 export function createAccess(deps: { identity: Identity; secrets: Secrets; cleanup: AccessCleanup }) {
   return {
-    hasPending: () => deps.identity.transaction(async (records) => await records.pendingCleanup() !== null),
+    hasPending: (accountId?: AccountId) => deps.identity.transaction(async (records) => await records.pendingCleanup(accountId) !== null),
     remove: (input: { accountId: AccountId; fleetId: FleetId | null }) => deps.identity.transaction(async (records) => {
       const account = await records.accountById(input.accountId);
       if (account === null) return { kind: 'notFound' as const };
@@ -23,12 +23,15 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
       }
       return { kind: 'saved' as const };
     }),
-    /** One target per transaction bounds work. Holding the lock prevents late cleanup racing recovery. */
-    reconcile: () => deps.identity.transaction(async (records) => {
-      const target = await records.pendingCleanup();
+    /**
+     * One target per transaction bounds work. Holding the lock prevents late cleanup racing recovery.
+     * Pending means this attempt made progress and more may wait; failed means the target stays unacknowledged.
+     */
+    reconcile: (accountId?: AccountId) => deps.identity.transaction(async (records) => {
+      const target = await records.pendingCleanup(accountId);
       if (target === null) return { kind: 'complete' as const };
       const outcome = await acknowledge({ cleanup: deps.cleanup, target });
-      if (!outcome.isOk) { await records.saveCleanup({ ...target, attempts: target.attempts + 1 }); return { kind: 'pending' as const }; }
+      if (!outcome.isOk) { await records.saveCleanup({ ...target, attempts: target.attempts + 1 }); return { kind: 'failed' as const }; }
       const progress = outcome.value;
       switch (progress.kind) {
         case 'acknowledged': await records.deleteCleanup(target.id); break;
@@ -36,7 +39,7 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
         case 'personShipFound': {
           if (target.fleetId !== null) {
             const right = await records.right({ accountId: target.accountId, fleetId: target.fleetId });
-            if (right === null) return { kind: 'pending' as const };
+            if (right === null) return { kind: 'failed' as const };
             await records.saveRight({ ...right, personShipId: progress.personShipId });
           }
           await records.saveCleanup({ ...target, attempts: target.attempts + 1, personShipId: progress.personShipId });
