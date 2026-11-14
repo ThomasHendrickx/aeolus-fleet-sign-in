@@ -98,7 +98,14 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       });
     },
     async revoke(signIn: string) {
-      return transaction(async (records) => records.deleteSharedSignIn(await digest(signIn)));
+      const hash = await digest(signIn);
+      return transaction(async (records) => {
+        const held = await records.sharedSignIn(hash);
+        if (held === null) return null;
+        // Preserve only the existing record with an ended lifetime, so a retry can still sign out core.
+        await records.saveSharedSignIn({ hash, sharedSignIn: { ...held, expiresAt: 0 } });
+        return held.accountId;
+      });
     },
   };
 

@@ -94,7 +94,8 @@ describe('first browser sign-in over the existing wire contract', () => {
 
   it('revokes shared sign-in before core sign-out, retries unavailable core, and preserves issued tokens', async () => {
     // Given Maya's shared sign-in, a valid fleet token and an unavailable core sign-out.
-    const { app, fleet, signer } = await serviceOfMaya();
+    const { app, fleet, signer, identity } = await serviceOfMaya();
+    const accountId = identity.accounts.get('maya@example.test')?.id;
     try {
       const shared = await app.signIn.authenticate({ email: 'maya@example.test', password: aSetup().input.password, address: 'browser' });
       if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
@@ -114,9 +115,9 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(unavailable.json()).toMatchObject({ error: 'temporarily_unavailable' });
       expect(afterSignOut.json()).toEqual({ error: 'invalid_grant' });
       expect(retried.statusCode).toBe(200);
-      expect(fleet.signedOutAccounts).toEqual(new Set(['maya-opaque-account']));
+      expect(fleet.signedOutAccounts).toEqual(new Set([accountId]));
       expect((await app.server.inject({ method: 'GET', url: '/api/apps', headers: { authorization: basicOf(client), 'aeolus-sign-in': shared.signIn } })).statusCode).toBe(401);
-      expect((await jwtVerify(issued.access_token, createLocalJWKSet(signer.publicKeys), { issuer: origin })).payload.sub).toBe('maya-opaque-account');
+      expect((await jwtVerify(issued.access_token, createLocalJWKSet(signer.publicKeys), { issuer: origin })).payload.sub).toBe(accountId);
       expect((await app.server.inject(revoke)).statusCode).toBe(200);
     } finally { await app.server.close(); }
   });
