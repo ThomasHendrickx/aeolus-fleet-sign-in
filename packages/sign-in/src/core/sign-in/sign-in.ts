@@ -1,4 +1,5 @@
 /** Durable browser-bound authorization and fixed-lifetime shared sign-ins. */
+import { normalisedEmail } from '../accounts/email.js';
 import type { Authorization, FailedAttempts, Identity, IdentityRecords, SignInSecrets } from '../shared/identity.js';
 
 /** Failures count within this window, and reaching a limit refuses attempts for as long. */
@@ -32,7 +33,8 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
 
   const steps = {
     async authenticate(input: { email: string; password: string; address: string }) {
-      const accountKey = `account:${await digest(input.email)}`;
+      const email = normalisedEmail(input.email);
+      const accountKey = `account:${await digest(email)}`;
       const addressKey = `address:${await digest(input.address)}`;
       return transaction(async (records) => {
         const now = deps.now();
@@ -40,7 +42,7 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
         const addressFailures = await records.attempts(addressKey);
         const retryAt = Math.max(accountFailures?.refusedUntil ?? 0, addressFailures?.refusedUntil ?? 0);
         if (retryAt > now) return { kind: 'tooManyAttempts' as const, retryAt };
-        const account = await records.account(input.email);
+        const account = await records.account(email);
         const isAccepted = await deps.secrets.verifyPassword({ password: input.password, hash: account?.passwordHash ?? null });
         if (!isAccepted || account === null) {
           const failedAccount = failed(accountFailures, { now, maximum: ACCOUNT_FAILURES });

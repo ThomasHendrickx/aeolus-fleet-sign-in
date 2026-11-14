@@ -2,6 +2,7 @@
 import type { AccountId, FleetId } from '@aeolus-fleet/common';
 
 import type { Identity, PersonFleets, Secrets } from '../shared/identity.js';
+import { normalisedEmail } from './email.js';
 
 export interface SetupInput {
   readonly email: string;
@@ -24,10 +25,11 @@ export function createSetup(deps: { identity: Identity; fleet: PersonFleets; sec
 
   return {
     establish: async (input: SetupInput) => {
+      const email = normalisedEmail(input.email);
       const account = await deps.identity.transaction(async (records) => {
-        const existing = await records.account(input.email);
+        const existing = await records.account(email);
         const created = existing ?? {
-          id: deps.secrets.accountId(), email: input.email, displayName: input.displayName,
+          id: deps.secrets.accountId(), email, displayName: input.displayName,
           passwordHash: await deps.secrets.hashPassword(input.password), organisationId: 'local',
         };
         if (existing === null) await records.saveAccount(created);
