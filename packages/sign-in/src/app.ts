@@ -14,16 +14,18 @@ import type { createSecrets } from './adapters/crypto/secrets.js';
 import type { createSigner } from './adapters/crypto/signer.js';
 import { clientOf } from './adapters/http/client-authentication.js';
 import { tokenRequestOf } from './adapters/http/token-request.js';
-import { credentialPage, refusalPage, signInStyles, startAgainPage } from './adapters/http/pages.js';
+import { credentialPage, noticeHtml, pausedNotice, refusalPage, setupRequiredPage, signInStyles, startAgainPage, unavailableNotice, wrongCredentialNotice } from './adapters/http/pages.js';
 
 const sharedCookie = 'aeolus_account_session';
 const browserCookie = 'aeolus_sign_in_browser';
 /** The browser-binding cookie lives as long as a sign-in flow: 10 minutes. */
 const BROWSER_BINDING_SECONDS = 600;
+const MILLISECONDS_PER_SECOND = 1000;
 const BODY_LIMIT_BYTES = 16_384;
 const REQUEST_TIMEOUT_MS = 15_000;
 const authorizeSchema = z.object({ response_type: z.literal('code'), client_id: z.string(), redirect_uri: z.url(), state: z.string().min(1).max(1024), code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code_challenge_method: z.literal('S256') });
 const credentialSchema = z.object({ flow: z.string().min(1).max(256), email: z.email().max(320), password: z.string().min(1).max(1024) });
+const submittedSchema = z.object({ flow: z.string().min(1).max(256), email: z.string().max(320).optional() });
 const startAgainSchema = z.object({ client: z.string().min(1).max(256).optional() });
 const revokeRequestSchema = z.object({ token: z.string().min(1).max(4096) });
 const script = await readFile(new URL('./adapters/http/assets/sign-in.js', import.meta.url), 'utf8');
@@ -41,9 +43,13 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
   });
   server.setErrorHandler((...args) => {
     const [, request, reply] = args;
-    const isForm = request.url === '/sign-in' && !wantsJson(request);
-    if (isForm) return reply.code(503).type('text/html').send(refusalPage({ heading: 'Can’t reach the sign-in service', text: 'Nothing changed in the fleet. Try again in a moment.' }));
-    return reply.code(503).send({ error: 'temporarily_unavailable', message: 'Sign-in is unavailable. Try again in a moment.' });
+    reply.code(503);
+    if (request.url !== '/sign-in') return reply.send({ error: 'temporarily_unavailable', message: 'Sign-in is unavailable. Try again in a moment.' });
+    if (wantsJson(request)) return reply.send({ kind: 'unavailable', notice: noticeHtml(unavailableNotice) });
+    // Scene 23: the credential form stays, with the person's email, and says the service could not complete it.
+    const submitted = submittedSchema.safeParse(request.body);
+    if (!submitted.success) return reply.type('text/html').send(startAgainPage('/'));
+    return reply.type('text/html').send(credentialPage({ flow: submitted.data.flow, notice: unavailableNotice, ...(submitted.data.email === undefined ? {} : { email: submitted.data.email }) }));
   });
   server.get('/health', () => Promise.resolve({ status: 'ok' }));
   server.get('/sign-in.css', async (_request, reply) => reply.type('text/css').send(signInStyles));
@@ -58,7 +64,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     if (client === undefined) return invalidConfiguration(reply);
     const browser = cookiesOf(request)[browserCookie] ?? deps.secrets.token();
     const authorized = await signIn.authorize({ clientId: client.id, redirectUri: client.redirectUri, state: input.state, codeChallenge: input.code_challenge, browser, signIn: cookiesOf(request)[sharedCookie] ?? null });
-    if (authorized.kind === 'setupRequired') return reply.code(503).type('text/html').send(refusalPage({ heading: 'Sign-in is not ready', text: 'The person who runs this installation must finish setup on the server before you can sign in.' }));
+    if (authorized.kind === 'setupRequired') return reply.code(503).type('text/html').send(setupRequiredPage(request.url));
     reply.header('set-cookie', cookie({ name: browserCookie, value: browser, seconds: BROWSER_BINDING_SECONDS }));
     if (authorized.kind === 'authorized') return reply.code(303).header('location', callbackOf(authorized)).send();
     return reply.type('text/html').send(credentialPage(authorized));
@@ -85,12 +91,12 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     if (submitted.kind === 'startAgain') return startAgain({ request, reply, clientId: submitted.clientId });
     if (submitted.kind !== 'authorized') {
       const retryAt = submitted.kind === 'tooManyAttempts' ? submitted.retryAt : undefined;
-      const message = retryAt === undefined ? 'Wrong email or password.' : `Too many attempts. Try again at ${new Date(retryAt).toISOString().slice(11, 16)} UTC. Sign-in is paused for 15 minutes.`;
+      const notice = retryAt === undefined ? wrongCredentialNotice : pausedNotice(retryAt);
       reply.code(retryAt === undefined ? 401 : 429);
-      if (retryAt !== undefined) reply.header('retry-after', String(Math.ceil((retryAt - deps.now()) / 1000)));
-      return wantsJson(request) ? { kind: submitted.kind, message, retryAt } : reply.type('text/html').send(credentialPage({ flow: input.flow, email: input.email, message, ...(retryAt === undefined ? {} : { retryAt }) }));
+      if (retryAt !== undefined) reply.header('retry-after', String(Math.ceil((retryAt - deps.now()) / MILLISECONDS_PER_SECOND)));
+      return wantsJson(request) ? { kind: submitted.kind, notice: noticeHtml(notice), retryAt } : reply.type('text/html').send(credentialPage({ flow: input.flow, email: input.email, notice, ...(retryAt === undefined ? {} : { retryAt }) }));
     }
-    reply.header('set-cookie', cookie({ name: sharedCookie, value: submitted.signIn, domain: config.cookieDomain, seconds: Math.max(0, Math.floor((submitted.expiresAt - deps.now()) / 1000)) }));
+    reply.header('set-cookie', cookie({ name: sharedCookie, value: submitted.signIn, domain: config.cookieDomain, seconds: Math.max(0, Math.floor((submitted.expiresAt - deps.now()) / MILLISECONDS_PER_SECOND)) }));
     return wantsJson(request) ? { kind: 'authorized', redirect: callbackOf(submitted) } : reply.code(303).header('location', callbackOf(submitted)).send();
   });
   server.post('/oauth/token', async (request, reply) => {

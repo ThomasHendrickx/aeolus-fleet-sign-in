@@ -1,13 +1,14 @@
 /* global document, HTMLFormElement, window, fetch, URLSearchParams, FormData */
-/* The form keeps input on refusal, shows busy feedback immediately and follows only the server's registered callback. */
+/* The form keeps input on refusal, shows busy feedback immediately and follows only the server's registered callback or start-again page. */
 const form = document.querySelector('[data-testid="sign-in-form"]');
 if (form instanceof HTMLFormElement) {
   const button = form.querySelector('button');
   const feedback = document.querySelector('[data-feedback]');
+  const unavailable = document.querySelector('[data-unavailable-notice]');
   let retryAt = Number(button.dataset.retryAt ?? 0);
   const waiting = () => {
-    if (Date.now() >= retryAt) { button.disabled = false; button.removeAttribute('data-retry-at'); }
-    else window.setTimeout(waiting, Math.min(retryAt - Date.now(), 1000));
+    if (Date.now() >= retryAt) { button.disabled = false; button.removeAttribute('data-disabled'); button.removeAttribute('data-retry-at'); }
+    else { button.setAttribute('data-disabled', ''); window.setTimeout(waiting, Math.min(retryAt - Date.now(), 1000)); }
   };
   if (retryAt > 0) waiting();
   form.addEventListener('submit', async (event) => {
@@ -20,16 +21,12 @@ if (form instanceof HTMLFormElement) {
       const result = await response.json();
       if (result.kind === 'authorized') { window.location.assign(result.redirect); return; }
       if (result.kind === 'startAgain') { window.location.assign(result.location); return; }
-      feedback.replaceChildren();
-      const notice = document.createElement('div');
-      notice.className = `notice ${result.retryAt ? 'waiting' : ''}`;
-      notice.setAttribute('role', 'alert');
-      notice.textContent = result.message ?? 'Sign-in is unavailable. Try again in a moment.';
-      feedback.append(notice);
+      if (typeof result.notice !== 'string') throw new Error('No notice');
+      // The notice markup is the server's own escaped rendering of the approved state.
+      feedback.innerHTML = result.notice;
       retryAt = result.retryAt ?? 0;
     } catch {
-      feedback.textContent = 'Sign-in is unavailable. Try again in a moment.';
-      feedback.setAttribute('role', 'alert');
+      feedback.replaceChildren(unavailable.content.cloneNode(true));
     } finally {
       button.textContent = 'Sign in';
       button.removeAttribute('aria-busy');

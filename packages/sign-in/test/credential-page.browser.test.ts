@@ -151,6 +151,7 @@ describe('approved credential screens', () => {
         await route.fulfill({ status: result.statusCode, headers, body: result.body });
       });
       const page = await context.newPage();
+      await page.clock.setFixedTime(Date.UTC(2026, 10, 14, 14, 30));
       const query = new URLSearchParams({ response_type: 'code', client_id: 'console', redirect_uri: redirectUri, state: 'browser-state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
       await page.goto(`${origin}/oauth/authorize?${query.toString()}`);
 
@@ -166,7 +167,7 @@ describe('approved credential screens', () => {
       expect(noticeIn(await page.locator('[data-feedback]').innerHTML())).toBe(approvedNotice(scene));
       if (scene === '05-too-many-attempts') {
         expect(await page.getByTestId('sign-in-submit').isDisabled()).toBe(true);
-        expect(await page.getByTestId('sign-in-submit').evaluate((button) => getComputedStyle(button).opacity)).toBe('0.45');
+        await expect.poll(() => page.getByTestId('sign-in-submit').evaluate((button) => getComputedStyle(button).opacity)).toBe('0.45');
       }
     } finally {
       await context.close();
