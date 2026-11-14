@@ -38,6 +38,7 @@ describe('first trusted setup', () => {
 
     // When the command is retried after the service restarts.
     expect(await setup(aSetup().input)).toEqual({ kind: 'unavailable' });
+    expect(identity.rights.get('flt_00000000000000000000000001/maya-opaque-account')).toMatchObject({ isFleetManager: true, personShipId: null });
     fleet.shouldLoseConfirmation = false;
     const restarted = createSetup({ identity, fleet, secrets: aSetup().secrets });
     const result = await restarted(aSetup().input);

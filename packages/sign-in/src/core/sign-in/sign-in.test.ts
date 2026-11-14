@@ -35,6 +35,22 @@ describe('Maya signs in to her local account', () => {
     expect((await fixture.signIn.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'different-address' })).kind).toBe('authenticated');
   });
 
+  it('counts failures within the previous 15 minutes across the first failure window boundary', async () => {
+    // Given an old failure followed by three recent failures.
+    const fixture = await signInOfMaya();
+    await fixture.signIn.authenticate({ email: 'maya@example.test', password: 'wrong', address: 'address' });
+    fixture.now = 840_000;
+    for (let count = 0; count < 3; count += 1) await fixture.signIn.authenticate({ email: 'maya@example.test', password: 'wrong', address: 'address' });
+
+    // When the oldest failure ages out, but two more failures join the recent three.
+    fixture.now = 900_001;
+    expect((await fixture.signIn.authenticate({ email: 'maya@example.test', password: 'wrong', address: 'address' })).kind).toBe('wrongCredential');
+    const refused = await fixture.signIn.authenticate({ email: 'maya@example.test', password: 'wrong', address: 'address' });
+
+    // Then five failures in the previous 15 minutes enforce the approved refusal.
+    expect(refused).toEqual({ kind: 'tooManyAttempts', retryAt: 1_800_001 });
+  });
+
   it('expires a shared sign-in exactly 12 hours from authentication without extending it on use', async () => {
     // Given a successful local authentication.
     const fixture = await signInOfMaya();

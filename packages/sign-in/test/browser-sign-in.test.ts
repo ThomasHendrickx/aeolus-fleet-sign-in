@@ -16,7 +16,7 @@ const origin = 'https://signin.example.test';
 const redirectUri = 'https://console.example.test/sign-in/done';
 const client = { id: 'console', secret: 'fixture-client-secret', redirectUri };
 
-async function serviceOfMaya() {
+async function serviceOfMaya(shouldSetUp = true) {
   const identity = memoryIdentity();
   const fleet = fleetOfMaya(identity);
   const secrets = createSecrets();
@@ -25,7 +25,7 @@ async function serviceOfMaya() {
   const app = createService({ identity, fleet, secrets, signer, now: () => Date.now(), config: {
     origin, cookieDomain: 'example.test', clients: [client], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
-  expect((await app.setup(aSetup().input)).kind).toBe('ready');
+  if (shouldSetUp) expect((await app.setup(aSetup().input)).kind).toBe('ready');
   return { app, secrets, signer, identity };
 }
 
@@ -75,6 +75,22 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(signed.body).not.toContain(aSetup().input.password);
       const apps = await app.server.inject({ method: 'GET', url: '/api/apps', headers: { authorization: `Basic ${Buffer.from(`${client.id}:${client.secret}`).toString('base64')}`, 'aeolus-sign-in': shared } });
       expect(apps.json()).toMatchObject({ account: { email: 'maya@example.test', firstName: 'Maya' }, fleets: [{ id: aSetup().input.fleetId, name: 'workshop' }] });
+    } finally { await app.server.close(); }
+  });
+
+  it('shows setup required to a public browser before trusted setup, without offering public signup', async () => {
+    // Given a configured service whose trusted setup has not run.
+    const { app, secrets } = await serviceOfMaya(false);
+    try {
+      // When the first public browser arrives.
+      const query = new URLSearchParams({ response_type: 'code', client_id: client.id, redirect_uri: redirectUri, state: 'state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
+      const result = await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
+
+      // Then it cannot claim the installation or submit a first-account password.
+      expect(result.statusCode).toBe(503);
+      expect(result.body).toContain('Sign-in is not ready');
+      expect(result.body).not.toContain('type="password"');
+      expect((await app.server.inject({ method: 'POST', url: '/setup' })).statusCode).toBe(404);
     } finally { await app.server.close(); }
   });
 
