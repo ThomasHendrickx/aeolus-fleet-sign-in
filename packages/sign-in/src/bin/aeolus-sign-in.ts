@@ -32,7 +32,8 @@ async function main() {
   const config = readConfig(process.env);
   const fleet = createPersonFleets({ url: config.coreUrl, installationToken: config.installationToken });
   const database = await openIdentity(config.databaseUrl);
-  const access = createAccess({ identity: database.identity, secrets: createSecrets(), cleanup: createAccessCleanup({ installationToken: config.installationToken, gateways: config.service.fleets, core: createCoreCleanup({ url: config.coreUrl, installationToken: config.installationToken }) }) });
+  const logCleanup = (message: string) => { process.stderr.write(`${message}\n`); };
+  const access = createAccess({ identity: database.identity, secrets: createSecrets(), cleanup: createAccessCleanup({ installationToken: config.installationToken, gateways: config.service.fleets, log: logCleanup, core: createCoreCleanup({ url: config.coreUrl, installationToken: config.installationToken, log: logCleanup }) }) });
   if (args[0] === 'migrate') { await database.close(); process.stdout.write('Sign-in database migrated.\n'); return; }
   if (['disable', 'remove-rights', 'recover', 'reconcile'].includes(args[0] ?? '')) {
     try { process.exitCode = await runAccessCommand({ args, fleets: config.service.fleets, terminal: privateTerminal(), access }); }
