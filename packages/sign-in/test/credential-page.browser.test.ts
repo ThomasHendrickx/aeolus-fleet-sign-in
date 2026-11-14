@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 /** Approved phone/desktop credential states in a real browser, with no screen redesign. */
 import { generateKeyPairSync } from 'node:crypto';
 
@@ -19,6 +20,7 @@ describe('approved credential screens', () => {
     // Given Maya's setup and the approved credential page in a secure sibling origin.
     const browser = await chromium.launch();
     const context = await browser.newContext({ viewport: { width, height: 900 } });
+    context.setDefaultTimeout(5000);
     const identity = memoryIdentity();
     const secrets = createSecrets();
     const waiting = Promise.withResolvers<undefined>();

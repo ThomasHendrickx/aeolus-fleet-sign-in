@@ -6,7 +6,7 @@ import { configDefaults, defineConfig, type TestProjectInlineConfiguration } fro
  * them one after another too, so no layer's time limits compete with another
  * layer's servers and databases on the same machine.
  */
-const LAYERS = ['unit', 'integration'];
+const LAYERS = ['unit', 'integration', 'browser'];
 
 function inLayerOrder(projects: TestProjectInlineConfiguration[]): TestProjectInlineConfiguration[] {
   return projects.map(withGroupOrder);
@@ -30,6 +30,7 @@ export default defineConfig({
     // A poll's own default (1 second) holds only on an idle machine.
     expect: { poll: { timeout: 10_000 } },
     projects: inLayerOrder([
+      { extends: true, test: { name: 'sign-in:browser', root: 'packages/sign-in', include: ['test/**/*.browser.test.ts'], maxWorkers: 1 } },
       {
         extends: true,
         test: { name: 'sign-in:integration', root: 'packages/sign-in', include: ['src/**/*.integration.test.ts', 'test/**/*.integration.test.ts'], testTimeout: 60_000, maxWorkers: 1 },
@@ -56,7 +57,7 @@ export default defineConfig({
           name: 'sign-in:unit',
           root: 'packages/sign-in',
           include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
-          exclude: [...configDefaults.exclude, '**/*.integration.test.ts'],
+          exclude: [...configDefaults.exclude, '**/*.integration.test.ts', '**/*.browser.test.ts'],
         },
       },
     ]),
