@@ -14,7 +14,7 @@ export function aSetup(): { input: SetupInput; secrets: Secrets } {
 export function fleetOfMaya(identity: Identity) {
   const people = new Map<string, ShipId>();
   const fleet = {
-    people, shouldLoseConfirmation: false,
+    people, shouldLoseConfirmation: false, shouldRefuseInstallation: false,
     async reconcile(input: { accountId: AccountId; fleetId: FleetId }) {
       const account = await identity.transaction((records) => records.accountById(input.accountId));
       if (account === null) throw new Error('Account must already be durable');

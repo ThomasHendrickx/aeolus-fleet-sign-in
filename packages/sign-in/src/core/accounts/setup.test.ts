@@ -10,7 +10,7 @@ describe('first trusted setup', () => {
     // Given an existing fleet and trusted setup with a privately supplied password.
     const identity = memoryIdentity();
     const fleet = fleetOfMaya(identity);
-    const setup = createSetup({ identity, fleet, secrets: aSetup().secrets });
+    const { establish: setup } = createSetup({ identity, fleet, secrets: aSetup().secrets });
 
     // When Maya is set up, then setup is retried with the same email.
     const first = await setup(aSetup().input);
@@ -34,13 +34,13 @@ describe('first trusted setup', () => {
     const identity = memoryIdentity();
     const fleet = fleetOfMaya(identity);
     fleet.shouldLoseConfirmation = true;
-    const setup = createSetup({ identity, fleet, secrets: aSetup().secrets });
+    const { establish: setup } = createSetup({ identity, fleet, secrets: aSetup().secrets });
 
     // When the command is retried after the service restarts.
-    expect(await setup(aSetup().input)).toEqual({ kind: 'unavailable' });
+    expect(await setup(aSetup().input)).toEqual({ kind: 'pending', reason: 'unavailable' });
     expect(identity.rights.get('flt_00000000000000000000000001/maya-opaque-account')).toMatchObject({ isFleetManager: true, personShipId: null });
     fleet.shouldLoseConfirmation = false;
-    const restarted = createSetup({ identity, fleet, secrets: aSetup().secrets });
+    const { establish: restarted } = createSetup({ identity, fleet, secrets: aSetup().secrets });
     const result = await restarted(aSetup().input);
 
     // Then the persisted id and installation commission key resolve the original person.
@@ -48,5 +48,25 @@ describe('first trusted setup', () => {
     expect(identity.accounts.size).toBe(1);
     expect(fleet.people.size).toBe(1);
     expect([...fleet.people.keys()]).toEqual(['person-maya-opaque-account']);
+  });
+
+  it('finds the account whose provisioning is pending after core refused the installation, and resumes it', async () => {
+    // Given setup that saved Maya but core refused installation authentication.
+    const identity = memoryIdentity();
+    const fleet = fleetOfMaya(identity);
+    fleet.shouldRefuseInstallation = true;
+    const setup = createSetup({ identity, fleet, secrets: aSetup().secrets });
+    expect(await setup.establish(aSetup().input)).toEqual({ kind: 'pending', reason: 'installationRefused' });
+
+    // When the configuration is fixed and setup looks for pending work, then resumes it.
+    fleet.shouldRefuseInstallation = false;
+    const pending = await setup.pendingAccount(aSetup().input.fleetId);
+    const resumed = await setup.resume({ accountId: 'maya-opaque-account', fleetId: aSetup().input.fleetId });
+
+    // Then it is Maya's saved account, and resuming maps her one person ship.
+    expect(pending).toMatchObject({ id: 'maya-opaque-account', displayName: 'Maya' });
+    expect(resumed).toEqual({ kind: 'ready', accountId: 'maya-opaque-account', personShipId: 'shp_00000000000000000000000001' });
+    expect(await setup.pendingAccount(aSetup().input.fleetId)).toBeNull();
+    expect(fleet.people.size).toBe(1);
   });
 });
