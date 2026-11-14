@@ -7,6 +7,7 @@ import {
 import { z } from 'zod';
 
 import type { FleetRight } from '../../core/shared/identity.js';
+import { CoreCompatibilityError } from './core-compatibility-error.js';
 
 export const MINIMUM_CORE_VERSION = '0.39.0';
 const TIMEOUT_MS = 10_000;
@@ -53,9 +54,11 @@ export function createPersonFleets(options: { url: string; installationToken: st
 
   return {
     async checkCompatibility() {
-      const version = z.object({ server: z.string() }).parse(await call({ path: '/api/version' })).server;
-      const parts = /^([0-9]+)\.([0-9]+)\.([0-9]+)$/.exec(version);
-      if (parts === null || (version !== '0.0.0' && Number(parts[1]) === 0 && Number(parts[2]) < 39)) throw new Error(`Sign-in requires core ${MINIMUM_CORE_VERSION} or newer`);
+      let version: string;
+      try { version = z.object({ server: z.string().regex(/^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/) }).parse(await call({ path: '/api/version' })).server; }
+      catch { throw new CoreCompatibilityError({ minimum: MINIMUM_CORE_VERSION, reported: null }); }
+      const parts = version.split('.');
+      if (version !== '0.0.0' && Number(parts[0]) === 0 && Number(parts[1]) < 39) throw new CoreCompatibilityError({ minimum: MINIMUM_CORE_VERSION, reported: version });
     },
     async reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight> {
       const found = await call({ path: `/trpc/installation.fleets.get?input=${encodeURIComponent(JSON.stringify({ fleetId: input.fleetId }))}` });

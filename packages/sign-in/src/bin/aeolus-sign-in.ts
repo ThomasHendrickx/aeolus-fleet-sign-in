@@ -4,6 +4,7 @@ import { createPrivateKey, generateKeyPairSync } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 
 import { idSchema } from '@aeolus-fleet/common';
+import { z } from 'zod';
 
 import { createService } from '../app.js';
 import { readConfig } from '../config.js';
@@ -12,6 +13,7 @@ import { runSetup } from '../adapters/cli/setup-command.js';
 import { createSecrets } from '../adapters/crypto/secrets.js';
 import { createSigner } from '../adapters/crypto/signer.js';
 import { createPersonFleets } from '../adapters/fleet/person-fleets.js';
+import { CoreCompatibilityError } from '../adapters/fleet/core-compatibility-error.js';
 import { openIdentity } from '../adapters/prisma/identity.js';
 
 async function main() {
@@ -50,4 +52,10 @@ async function main() {
 }
 
 try { await main(); }
-catch { process.stderr.write('Sign-in could not complete. Check the command and its server configuration; no access was granted.\n'); process.exitCode = 1; }
+catch (error) {
+  if (error instanceof CoreCompatibilityError) {
+    const version = z.object({ version: z.string() }).parse(JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'))).version;
+    process.stderr.write(`Sign-in ${version}: ${error.message}\n`);
+  } else process.stderr.write('Sign-in could not complete. Check the command and its server configuration; no access was granted.\n');
+  process.exitCode = 1;
+}
