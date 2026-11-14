@@ -1,6 +1,8 @@
 /// <reference lib="dom" />
 /** Approved phone/desktop credential states in a real browser, with no screen redesign. */
 import { generateKeyPairSync } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
@@ -19,7 +21,7 @@ describe('approved credential screens', () => {
   it.each([375, 1440])('keeps credentials on refusal, shows pending immediately, and completes the initiating browser at %i px', async (width) => {
     // Given Maya's setup and the approved credential page in a secure sibling origin.
     const browser = await chromium.launch();
-    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    const context = await browser.newContext({ viewport: { width, height: width < 640 ? 812 : 900 } });
     context.setDefaultTimeout(5000);
     const identity = memoryIdentity();
     const secrets = createSecrets();
@@ -39,17 +41,27 @@ describe('approved credential screens', () => {
       });
       await context.route(`${redirectUri}**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>Console callback boundary</h1>' }));
       const page = await context.newPage();
+      const capture = async (state: string) => {
+        const directory = process.env.SIGN_IN_SCREENSHOT_DIR;
+        if (directory === undefined) return;
+        await mkdir(directory, { recursive: true });
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: join(directory, `${width}-${state}.png`), fullPage: true });
+      };
       const query = new URLSearchParams({ response_type: 'code', client_id: 'console', redirect_uri: redirectUri, state: 'browser-state', code_challenge: await secrets.digest('verifier'), code_challenge_method: 'S256' });
       await page.goto(`${origin}/oauth/authorize?${query.toString()}`);
+      await capture('credentials');
 
       // When Maya submits a wrong credential, then corrects it after the refusal.
       await page.getByTestId('sign-in-email').fill('maya@example.test');
       await page.getByTestId('sign-in-password').fill('wrong');
       await page.getByTestId('sign-in-submit').click();
       expect(await page.getByRole('button', { name: 'Signing in...' }).isDisabled()).toBe(true);
+      await capture('pending');
       waiting.resolve(undefined);
       await page.getByRole('alert').waitFor();
       expect(await page.getByRole('alert').innerText()).toBe('Wrong email or password.');
+      await capture('wrong-credential');
       expect(await page.getByTestId('sign-in-email').inputValue()).toBe('maya@example.test');
       expect(await page.getByTestId('sign-in-password').inputValue()).toBe('wrong');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
