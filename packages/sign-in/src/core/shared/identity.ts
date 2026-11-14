@@ -110,5 +110,5 @@ export interface CleanupTarget {
 }
 
 export interface AccessCleanup {
-  acknowledge(target: CleanupTarget): Promise<boolean | { readonly cursor: string }>;
+  acknowledge(target: CleanupTarget): Promise<boolean | { readonly cursor: string } | { readonly personShipId: ShipId }>;
 }

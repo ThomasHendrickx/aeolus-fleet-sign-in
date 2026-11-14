@@ -17,7 +17,7 @@ const run = promisify(execFile);
 const token = 'test-installation-token-not-a-deployment-secret';
 
 describe('the released core person lifecycle', () => {
-  it('resolves the existing fleet, grants all offered scopes and retries the installation person commission without duplication', async () => {
+  it('preserves the person, releases only owned trierarchs across pages and keeps one-use argo recovery independent', async () => {
     // Given a fresh released core installation with one existing fleet.
     const postgres = await new PostgreSqlContainer('postgres:17-alpine').start();
     const require = createRequire(import.meta.url);
@@ -58,6 +58,8 @@ describe('the released core person lifecycle', () => {
       const ticket = z.object({ ticket: z.string() }).parse(await post('/trpc/installation.operators.issueSignInTicket', { fleetId: fleet.fleetId })).ticket;
       const redeemed = await fetch(`${url}/trpc/console.redeemSignInTicket`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ticket }) });
       actorHeaders = { origin: 'https://core.example.test', cookie: redeemed.headers.get('set-cookie')?.split(';')[0] ?? '' };
+      const personPrompt = z.object({ secret: z.string() }).parse(await post('/trpc/fleet.getStartingPrompt', { shipId: first.personShipId }));
+      const personToken = registerOutputSchema.parse(await post('/api/v1/ship/register', { shipId: first.personShipId, secret: personPrompt.secret, location: { kind: 'SERVER' } })).crewToken;
       const gatewayShip = commissionShipOutputSchema.parse(await post('/trpc/fleet.commission', { name: 'gateway', type: 'gateway', kind: 'app', owner: first.personShipId, scopes: ['fleet:commission', 'fleet:on-behalf'], idempotencyKey: 'gateway' }));
       const gatewayToken = registerOutputSchema.parse(await post('/api/v1/ship/register', { shipId: gatewayShip.shipId, secret: gatewayShip.secret, location: { kind: 'SERVER' } })).crewToken;
       actorHeaders = { authorization: `Bearer ${gatewayToken}` };
@@ -76,9 +78,10 @@ describe('the released core person lifecycle', () => {
       expect(await cleanup.acknowledge({ ...target, kind: 'cutOff', fleetId: null })).toBe(true);
       const firstPage = await cleanup.acknowledge({ ...target, kind: 'fleet' });
       expect(typeof firstPage).toBe('object');
-      if (typeof firstPage !== 'object') throw new Error('Expected another cleanup page');
+      if (typeof firstPage !== 'object' || !('cursor' in firstPage)) throw new Error('Expected another cleanup page');
       expect(await cleanup.acknowledge({ ...target, cursor: firstPage.cursor, kind: 'fleet' })).toBe(true);
       expect(await cleanup.acknowledge({ ...target, cursor: firstPage.cursor, kind: 'fleet' })).toBe(true);
+      expect((await fetch(`${url}/api/v1/ship/whoami`, { headers: { authorization: `Bearer ${personToken}` } })).status).toBe(401);
       expect((await fetch(`${url}/api/v1/ship/whoami`, { headers: { authorization: `Bearer ${trierarchToken}` } })).status).toBe(401);
       expect((await fetch(`${url}/api/v1/ship/whoami`, { headers: { authorization: `Bearer ${agentToken}` } })).status).toBe(200);
       const listed = await fetch(`${url}/trpc/fleet.list?input=${encodeURIComponent(JSON.stringify({ shipIds: [first.personShipId] }))}`, { headers: { 'x-aeolus-installation-token': token, 'aeolus-fleet': fleet.fleetId } });

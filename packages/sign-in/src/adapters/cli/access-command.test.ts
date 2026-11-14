@@ -40,7 +40,7 @@ describe('trusted removal and recovery commands', () => {
     expect(await command.identity.transaction((records) => records.right({ accountId: command.accountId, fleetId: command.fleetId }))).toMatchObject({ isFleetManager: true, personShipId: 'shp_00000000000000000000000001' });
   });
 
-  it('refuses password arguments, pipelines and unknown accounts without changing access', async () => {
+  it('refuses password arguments and pipelines, and reports an unknown account without changing access', async () => {
     // Given a non-private terminal.
     const command = await aCommand();
     command.terminal.isTerminal = false;
@@ -53,6 +53,9 @@ describe('trusted removal and recovery commands', () => {
 
     // Then no supplied password is printed or access changed.
     expect(command.output.join('\n')).not.toContain('do-not-echo-this');
+    command.output.length = 0;
+    expect(await command.run(['disable', '--account', 'unknown-account'])).toBe(1);
+    expect(command.output).toEqual(['Account identity was not found. Check the account id and retry.']);
     expect(await command.identity.transaction((records) => records.accountById(command.accountId))).toMatchObject({ isDisabled: false, accessVersion: 0 });
   });
 });

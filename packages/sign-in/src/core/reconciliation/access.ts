@@ -26,11 +26,19 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
     reconcile: () => deps.identity.transaction(async (records) => {
       const target = await records.pendingCleanup();
       if (target === null) return { kind: 'complete' as const };
-      let outcome: boolean | { readonly cursor: string };
+      let outcome: Awaited<ReturnType<AccessCleanup['acknowledge']>>;
       try { outcome = await deps.cleanup.acknowledge(target); }
       catch { outcome = false; }
       if (outcome === true) await records.deleteCleanup(target.id);
-      else await records.saveCleanup({ ...target, attempts: target.attempts + 1, cursor: typeof outcome === 'object' ? outcome.cursor : target.cursor });
+      else {
+        const personShipId = typeof outcome === 'object' && 'personShipId' in outcome ? outcome.personShipId : target.personShipId;
+        if (personShipId !== target.personShipId && target.fleetId !== null) {
+          const right = await records.right({ accountId: target.accountId, fleetId: target.fleetId });
+          if (right === null) return { kind: 'pending' as const };
+          await records.saveRight({ ...right, personShipId });
+        }
+        await records.saveCleanup({ ...target, attempts: target.attempts + 1, personShipId, cursor: typeof outcome === 'object' && 'cursor' in outcome ? outcome.cursor : target.cursor });
+      }
       return { kind: 'pending' as const };
     }),
     recover: async (input: { accountId: AccountId; password: string; shouldEnable: boolean; fleetId: FleetId | null }) => {

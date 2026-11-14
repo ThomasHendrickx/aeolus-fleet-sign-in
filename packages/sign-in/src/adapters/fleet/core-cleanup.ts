@@ -1,11 +1,12 @@
 /** Installation cleanup preserves person identity and releases only the owned trierarchs. */
-import { fleetListOutputSchema, installationAccountsCutOffOutputSchema, labelsOutputSchema, labelWriteOutputSchema, releaseShipOutputSchema, type FleetId, type ShipId } from '@aeolus-fleet/common';
+import { commissionShipOutputSchema, fleetListOutputSchema, installationAccountsCutOffOutputSchema, labelsOutputSchema, labelWriteOutputSchema, releaseShipOutputSchema, type FleetId, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { AccessCleanup, CleanupTarget } from '../../core/shared/identity.js';
 
 const TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 20;
+const PERSON_NAME_ACCOUNT_CHARACTERS = 12;
 
 export function createCoreCleanup(options: { url: string; installationToken: string }): AccessCleanup {
   return {
@@ -27,7 +28,13 @@ export function createCoreCleanup(options: { url: string; installationToken: str
           return true;
         }
         if (target.kind !== 'fleet' || target.fleetId === null) return false;
-        if (target.personShipId === null) return true;
+        if (target.personShipId === null) {
+          const person = commissionShipOutputSchema.parse(await call({ path: 'fleet.commission', fleetId: target.fleetId, body: {
+            name: `person-${target.accountId.slice(0, PERSON_NAME_ACCOUNT_CHARACTERS)}`, type: 'person', kind: 'person',
+            scopes: ['messages:send', 'messages:receive'], idempotencyKey: `person-${target.accountId}`,
+          } }));
+          return { personShipId: person.shipId };
+        }
         const fleetId = target.fleetId;
         const list = async (query: unknown) => fleetListOutputSchema.parse(await call({ path: 'fleet.list', fleetId, query }));
         const release = async (shipId: ShipId) => { releaseShipOutputSchema.parse(await call({ path: 'fleet.release', fleetId, body: { shipId } })); };

@@ -131,7 +131,7 @@ describe('access cleanup durability', () => {
     expect(await retry.recover({ accountId, password: 'replacement-password', shouldEnable: true, fleetId: setup.input.fleetId })).toEqual({ kind: 'recovered' });
   });
 
-  it('rolls back removal, survives restart and serialises concurrent cleanup acknowledgements', async () => {
+  it('retries cleanup after removal rollback, lost acknowledgement, concurrent commands and restart', async () => {
     // Given Maya and an interrupted removal transaction.
     const setup = aSetup();
     const accountId = setup.secrets.accountId();
