@@ -72,6 +72,7 @@ describe('the released core person lifecycle', () => {
       // When durable removal reconciles a bounded page, then resumes at its saved cursor.
       const cleanup = createCoreCleanup({ url, installationToken: token });
       const target = { id: 'removal', attempts: 0, cursor: null, ...input, personShipId: first.personShipId, shouldReleaseOwnedTrierarchs: true };
+      expect(await cleanup.acknowledge({ ...target, kind: 'fleet', personShipId: null })).toEqual({ personShipId: first.personShipId });
       expect(await cleanup.acknowledge({ ...target, kind: 'cutOff', fleetId: null })).toBe(true);
       const firstPage = await cleanup.acknowledge({ ...target, kind: 'fleet' });
       expect(typeof firstPage).toBe('object');

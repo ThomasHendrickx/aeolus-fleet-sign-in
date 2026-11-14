@@ -105,6 +105,32 @@ describe('durable identity across rollback concurrency and restart', () => {
 
 
 describe('access cleanup durability', () => {
+  it('saves the same person mapping resolved after a lost commission reply before acknowledging removal', async () => {
+    // Given core created Maya's person but setup lost the reply before saving its mapping.
+    const setup = aSetup();
+    const accountId = setup.secrets.accountId();
+    await createSetup({ identity: database.identity, fleet: fleetOfMaya(), secrets: setup.secrets }).establish(setup.input);
+    await database.identity.transaction(async (records) => {
+      const right = await records.right({ accountId, fleetId: setup.input.fleetId });
+      if (right === null) throw new Error('Expected right');
+      await records.saveRight({ ...right, personShipId: null });
+    });
+    const access = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: (target) => Promise.resolve(target.kind === 'fleet' && target.personShipId === null ? { personShipId: 'shp_00000000000000000000000001' } : true) } });
+
+    // When removal resolves the original commission key and the service restarts.
+    await access.remove({ accountId, fleetId: null });
+    for (let index = 0; index < 3; index += 1) await access.reconcile();
+    await database.close();
+    database = await openIdentity(container.getConnectionUri());
+
+    // Then the mapping is durable and only subsequent cleanup can acknowledge the remaining fleet target.
+    expect(await database.identity.transaction((records) => records.right({ accountId, fleetId: setup.input.fleetId }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001', scopes: [] });
+    expect(await database.identity.transaction((records) => records.pendingCleanup(accountId))).toMatchObject({ personShipId: 'shp_00000000000000000000000001', kind: 'fleet' });
+    const retry = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: () => Promise.resolve(true) } });
+    while ((await retry.reconcile()).kind === 'pending') { /* finish removal */ }
+    expect(await retry.recover({ accountId, password: 'replacement-password', shouldEnable: true, fleetId: setup.input.fleetId })).toEqual({ kind: 'recovered' });
+  });
+
   it('rolls back removal, survives restart and serialises concurrent cleanup acknowledgements', async () => {
     // Given Maya and an interrupted removal transaction.
     const setup = aSetup();
