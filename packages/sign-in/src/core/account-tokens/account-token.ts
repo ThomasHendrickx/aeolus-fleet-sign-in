@@ -1,11 +1,11 @@
 /** Issues fresh fleet claims only for a live shared sign-in with an existing grant. */
-import type { accountTokenClaimsSchema, FleetId } from '@aeolus-fleet/common';
+import type { accountTokenClaimsSchema, FleetId, ShipId } from '@aeolus-fleet/common';
 import type { z } from 'zod';
 
 import type { createSignIn } from '../sign-in/sign-in.js';
 import type { Identity, PersonFleets } from '../shared/identity.js';
 
-export type FleetClaims = z.input<typeof accountTokenClaimsSchema>;
+export type FleetClaims = Omit<z.input<typeof accountTokenClaimsSchema>, 'aud' | 'person_ship'> & { readonly aud: FleetId; readonly person_ship?: ShipId };
 
 export interface AccountTokenSigner {
   sign(claims: FleetClaims): Promise<string>;

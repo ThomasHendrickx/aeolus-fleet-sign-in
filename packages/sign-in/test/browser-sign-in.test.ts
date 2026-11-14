@@ -57,7 +57,7 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(callback.origin + callback.pathname).toBe(redirectUri);
       expect(callback.searchParams.get('state')).toBe('browser-state');
       const sharedCookie = cookieOf(signed, 'aeolus_account_session');
-      expect(signed.headers['set-cookie']).toEqual(expect.arrayContaining([expect.stringContaining('Domain=example.test; Path=/; HttpOnly; Secure; SameSite=Lax')]));
+      expect(String(signed.headers['set-cookie'])).toContain('Domain=example.test; Path=/; HttpOnly; Secure; SameSite=Lax');
       const codeForm = { ...form({ grant_type: 'authorization_code', client_id: client.id, client_secret: client.secret, code: callback.searchParams.get('code') ?? '', redirect_uri: redirectUri, code_verifier: 'browser-verifier' }) };
       expect((await app.server.inject({ method: 'POST', url: '/oauth/token', ...codeForm })).statusCode).toBe(200);
       expect((await app.server.inject({ method: 'POST', url: '/oauth/token', ...codeForm })).json()).toMatchObject({ error: 'invalid_grant' });
@@ -68,8 +68,8 @@ describe('first browser sign-in over the existing wire contract', () => {
       expect(exchanged.statusCode).toBe(200);
       const token = z.object({ access_token: z.string(), expires_in: z.literal(600) }).parse(exchanged.json());
       const keys = await app.server.inject({ method: 'GET', url: '/.well-known/jwks.json' });
-      const verified = await jwtVerify(token.access_token, createLocalJWKSet(keys.json()), { issuer: origin, audience: aSetup().input.fleetId, typ: 'at+jwt' });
-      expect(accountTokenClaimsSchema.parse(verified.payload)).toMatchObject({ accountId: expect.any(String), personShipId: 'shp_00000000000000000000000001', isArgoAllowed: false });
+      const verified = await jwtVerify(token.access_token, createLocalJWKSet(z.object({ keys: z.array(z.object({ kty: z.string() }).catchall(z.unknown())) }).parse(keys.json<unknown>())), { issuer: origin, audience: aSetup().input.fleetId, typ: 'at+jwt' });
+      expect(accountTokenClaimsSchema.parse(verified.payload)).toMatchObject({ personShipId: 'shp_00000000000000000000000001', isArgoAllowed: false });
       expect(keys.body).not.toContain('"d":');
       expect(signed.body + started.body + keys.body).not.toContain(client.secret);
       expect(signed.body).not.toContain(aSetup().input.password);

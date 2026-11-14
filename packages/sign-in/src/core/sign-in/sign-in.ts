@@ -55,6 +55,12 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       await transaction(async (records) => records.saveAuthorization({ hash: await digest(flow), authorization: { ...input, browser: await digest(input.browser), expiresAt: deps.now() + FLOW_LIFE } }));
       return { flow };
     },
+    async inspect(input: { flow: string; browser: string }) {
+      return transaction(async (records) => {
+        const flow = await records.authorization(await digest(input.flow));
+        return flow !== null && flow.expiresAt > deps.now() && flow.browser === await digest(input.browser);
+      });
+    },
     async complete(input: { flow: string; browser: string; signIn: string }) {
       const flowHash = await digest(input.flow);
       return transaction(async (records) => {
