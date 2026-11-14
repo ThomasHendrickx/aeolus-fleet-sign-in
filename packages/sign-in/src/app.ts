@@ -8,6 +8,7 @@ import { createOpenableFleets } from './core/accounts/openable-fleets.js';
 import { createSetup } from './core/accounts/setup.js';
 import { createAccountToken } from './core/account-tokens/account-token.js';
 import { createSignIn } from './core/sign-in/sign-in.js';
+import { createSignOut, type AccountSessions } from './core/sign-in/sign-out.js';
 import type { Identity, PersonFleets } from './core/shared/identity.js';
 import { serviceConfigSchema, type ServiceConfig } from './config.js';
 import type { createSecrets } from './adapters/crypto/secrets.js';
@@ -30,10 +31,11 @@ const startAgainSchema = z.object({ client: z.string().min(1).max(256).optional(
 const revokeRequestSchema = z.object({ token: z.string().min(1).max(4096) });
 const script = await readFile(new URL('./adapters/http/assets/sign-in.js', import.meta.url), 'utf8');
 
-export function createService(deps: { identity: Identity; fleet: PersonFleets; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number }) {
+export function createService(deps: { identity: Identity; fleet: PersonFleets & AccountSessions; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number }) {
   const config = serviceConfigSchema.parse(deps.config);
   const server = Fastify({ logger: false, trustProxy: config.trustedProxy ?? false, bodyLimit: BODY_LIMIT_BYTES, requestTimeout: REQUEST_TIMEOUT_MS });
   const signIn = createSignIn(deps);
+  const signOut = createSignOut({ signIn, sessions: deps.fleet });
   const token = createAccountToken({ ...deps, issuer: config.origin, signIn });
   const setup = createSetup(deps);
   const openableFleets = createOpenableFleets({ identity: deps.identity, signIn });
@@ -131,8 +133,8 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     if (clientOf(request, config) === null) return reply.code(401).send({ error: 'invalid_client' });
     const revoked = revokeRequestSchema.safeParse(request.body);
     if (!revoked.success) return reply.code(400).send({ error: 'invalid_request' });
-    await signIn.revoke(revoked.data.token);
-    return {};
+    const result = await signOut(revoked.data.token);
+    return result.kind === 'unavailable' ? reply.code(503).send({ error: 'temporarily_unavailable' }) : {};
   });
   return { server, setup, signIn };
 }

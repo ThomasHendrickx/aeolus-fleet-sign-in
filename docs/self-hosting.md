@@ -92,7 +92,27 @@ Keep protected backups of the sign-in database, server configuration and private
 
 Restore the database and the same server configuration/keys on the matching installation before admitting browser traffic. Check core and issuer-key connectivity. Retry trusted setup with the original email and fleet to reconcile its existing installation person key, then verify the same person ship and history. Do not manufacture a new account id or commission a new person to repair a missing mapping. Restoring an old backup is not a guarantee that newer shared sign-in revocations are preserved; use the account recovery slice's procedure when available.
 
-For rotation, first add the replacement key file and id to `SIGN_IN_SIGNING_KEYS`, retaining the old key as active. Restart so the replacement public key is published before it is used. Allow core's public-key refresh to observe it, then switch `SIGN_IN_ACTIVE_KEY_ID` and restart. Retain the old public key through its last 10-minute account token plus the 30-second validation allowance; keep protected backups according to the deployment's recovery policy. This slice does not automate rotation or removal cleanup.
+Rotate keys through protected server configuration:
+
+1. Generate the replacement key with a new id and a private file. Add it to `SIGN_IN_SIGNING_KEYS` beside the old key, retaining the old `SIGN_IN_ACTIVE_KEY_ID`.
+2. Restart the service. Check that `/.well-known/jwks.json` publishes both public keys, without private material. Do not activate the replacement until every serving instance publishes it.
+3. Wait more than core's one-minute key-refresh interval after publication. Then switch `SIGN_IN_ACTIVE_KEY_ID` to the replacement and restart. Fresh tokens identify the replacement with `kid`; existing tokens still identify the old key.
+4. Keep the old key published until more than 10 minutes and 30 seconds after the last instance stopped signing with it. The interval starts at the last old-key token, not when the replacement was first published.
+5. Remove the old key from serving configuration and restart. Retain protected backups according to the deployment's recovery policy.
+
+Rotation is operational, without an automated key lifecycle. Removing the old public key early makes otherwise live tokens unverifiable. A service restart loads the configured keys; no private key or installation token is sent to core.
+
+## Returning and signing out
+
+Returning with a live shared sign-in skips the credential form and lets each app obtain a fresh 10-minute fleet token for the same account and person ship. The service never renews the shared cookie on use. At exactly 12 hours after authentication, it refuses further exchanges and requests authentication again. The account, person ship, history and ownership stay the same.
+
+Apps refresh fleet tokens before expiry through the existing authenticated token exchange. During an issuer outage no fresh token is available; an already issued token can continue until its own expiry, with core's existing 30-second validation allowance. Signed-out (`invalid_grant`), no-rights (`invalid_target`) and unavailable (`temporarily_unavailable`) remain distinct. A retained person crew never authorises browser access by itself.
+
+An authenticated app signs out with `POST /oauth/revoke`. The service first commits the end of that shared sign-in, then calls `installation.accounts.signOut` for its account. This ends account-linked argo console sessions without cutting off issued account tokens or releasing ordinary agents. Other apps using the same shared sign-in cannot obtain fresh tokens or app discovery after revocation. Apps own their browser cookie clearing and the approved signed-out and session-ended screens.
+
+If core cannot complete sign-out, the service returns HTTP 503 with `temporarily_unavailable`. The local sign-in stays revoked. Retry the same request when core returns: the retained ended sign-in record still resolves its account, including after a service restart. There is no background sign-out retry queue. An unknown sign-in revokes idempotently without disclosing an account.
+
+Argo's independent server sign-in remains available for recovery. Shared sign-out does not disable the account or remove fleet access; those are separate lifecycle operations.
 
 ## Data access and validation
 

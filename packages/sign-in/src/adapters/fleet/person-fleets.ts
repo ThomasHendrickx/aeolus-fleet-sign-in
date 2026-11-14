@@ -1,7 +1,7 @@
 /** Calls only core's published installation and fleet APIs; never authenticates as argo. */
 import {
   changeLabelValuesOutputSchema, commissionShipOutputSchema,
-  installationFleetSchema, labelsOutputSchema, scopesOutputSchema,
+  installationFleetSchema, installationAccountsSignOutOutputSchema, labelsOutputSchema, scopesOutputSchema,
   type AccountId, type FleetId, type NetworkRule,
 } from '@aeolus-fleet/common';
 import { z } from 'zod';
@@ -64,6 +64,9 @@ export function createPersonFleets(options: { url: string; installationToken: st
   }
 
   return {
+    async signOut(accountId: AccountId) {
+      installationAccountsSignOutOutputSchema.parse(await call({ path: '/trpc/installation.accounts.signOut', body: { accountId } }));
+    },
     async checkCompatibility() {
       let version: string;
       try { version = z.object({ server: z.string().regex(/^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/) }).parse(await call({ path: '/api/version' })).server; }

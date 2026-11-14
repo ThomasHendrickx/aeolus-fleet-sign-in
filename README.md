@@ -2,7 +2,7 @@
 
 `@aeolus-fleet/sign-in` signs a named person into an existing self-hosted fleet. It owns local credentials, shared browser sign-ins, fleet-manager grants and stable person-ship mappings. Core keeps ships and messages; gateway provides Bridge.
 
-The first journey follows the [approved design](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/design/self-hosted-sign-in.md) and [aeolus-fleet #1810](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1810). The [approved screen set](docs/mockups/first-journey/README.md) is retained for comparison.
+The first journey follows the [approved design](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/design/self-hosted-sign-in.md) and [aeolus-fleet #1810](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1810). Returning sign-in and token lifecycle follow [#1811](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1811). The [approved screen set](docs/mockups/first-journey/README.md) is retained for comparison.
 
 Run from source with Node 26 and npm:
 
@@ -31,4 +31,4 @@ npm exec playwright install chromium
 npm test -- --project sign-in:browser
 ```
 
-Integration tests start only their own Postgres containers and a released core. Browser tests cover the approved form at phone and desktop widths. The HTTPS/core scenario proves stable person ownership and question/answer delivery; it does not replace a deployed console/Bridge acceptance walk. Access removal and account recovery are later slices, [#1811](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1811) and [#1812](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1812).
+Integration tests start only their own Postgres containers and a released core. Browser tests cover the approved form at phone and desktop widths. The HTTPS/core scenario proves stable person ownership and question/answer delivery; it does not replace a deployed console/Bridge acceptance walk. Shared sign-out revokes locally before ending account-linked core sessions; a core outage returns unavailable for client retry. Operational key rotation publishes the replacement before activation and retains the old key through the last token and allowance. Access removal and account recovery belong to [#1812](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1812).
