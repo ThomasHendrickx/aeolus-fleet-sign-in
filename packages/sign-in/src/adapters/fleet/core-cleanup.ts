@@ -42,14 +42,18 @@ export function createCoreCleanup(options: { url: string; installationToken: str
         const list = async (query: unknown) => fleetListOutputSchema.parse(await call({ path: 'fleet.list', fleetId, query }));
         const release = async (shipId: ShipId) => { releaseShipOutputSchema.parse(await call({ path: 'fleet.release', fleetId, body: { shipId } })); };
         const page = await list({ shipIds: [target.personShipId], limit: 1 });
+        // A person ship that is gone, or carries no labels, has nothing left to clear.
         const person = page.items.find((ship) => ship.id === target.personShipId);
-        if (person === undefined || !('labels' in person)) return unavailable;
-        const labels = labelsOutputSchema.parse(await call({ path: 'fleet.labels', fleetId }));
-        const group = labels.find((label) => label.key === 'group' && label.owner.kind === 'installation');
-        for (const label of person.labels.filter((label) => label.labelId === group?.id)) {
-          labelWriteOutputSchema.parse(await call({ path: 'fleet.unassignLabel', fleetId, body: { shipId: person.id, valueId: label.valueId } }));
+        if (person !== undefined) {
+          if ('labels' in person && person.labels.length > 0) {
+            const labels = labelsOutputSchema.parse(await call({ path: 'fleet.labels', fleetId }));
+            const group = labels.find((label) => label.key === 'group' && label.owner.kind === 'installation');
+            for (const label of person.labels.filter((label) => label.labelId === group?.id)) {
+              labelWriteOutputSchema.parse(await call({ path: 'fleet.unassignLabel', fleetId, body: { shipId: person.id, valueId: label.valueId } }));
+            }
+          }
+          if (person.status === 'crewed') await release(person.id);
         }
-        if (person.status === 'crewed') await release(person.id);
         if (target.shouldReleaseOwnedTrierarchs) return await releaseOwned({ target, list, release });
         return acknowledged;
       } catch { return unavailable; }
