@@ -1,12 +1,14 @@
 /** Durable browser-bound authorization and fixed-lifetime shared sign-ins. */
 import { normalisedEmail } from '../accounts/email.js';
-import type { Authorization, FailedAttempts, Identity, IdentityRecords, SignInSecrets } from '../shared/identity.js';
+import type { Authorization, FailedAttempts, Identity, IdentityRecords, SharedSignIn, SignInSecrets } from '../shared/identity.js';
 
 /** Failures count within this window, and reaching a limit refuses attempts for as long. */
 export const ATTEMPT_WINDOW = 15 * 60 * 1000;
 const ACCOUNT_FAILURES = 5;
 const ADDRESS_FAILURES = 20;
 const SHARED_SIGN_IN_LIFE = 12 * 60 * 60 * 1000;
+/** A revoked shared sign-in stays this long so a client can retry a sign-out that core did not finish. */
+const REVOKED_RETRY_WINDOW = 15 * 60 * 1000;
 const FLOW_LIFE = 10 * 60 * 1000;
 
 export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets; now: () => number }) {
@@ -27,8 +29,19 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
 
   async function accountIn(records: IdentityRecords, hash: string) {
     const held = await records.sharedSignIn(hash);
-    if (held === null || held.expiresAt <= deps.now()) return null;
+    if (held === null) return null;
+    if (held.expiresAt <= deps.now()) {
+      await dropUnlessRetryable(records, { hash, held });
+      return null;
+    }
     return records.accountById(held.accountId);
+  }
+
+  /** An ended record is kept only while a revoked one can still be retried; any other is deleted. */
+  async function dropUnlessRetryable(records: IdentityRecords, input: { hash: string; held: SharedSignIn }) {
+    if (isRetryable(input.held, deps.now())) return false;
+    await records.deleteSharedSignIn(input.hash);
+    return true;
   }
 
   const steps = {
@@ -102,9 +115,15 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       return transaction(async (records) => {
         const held = await records.sharedSignIn(hash);
         if (held === null) return null;
-        // Preserve only the existing record with an ended lifetime, so a retry can still sign out core.
-        await records.saveSharedSignIn({ hash, sharedSignIn: { ...held, expiresAt: 0 } });
-        return held.accountId;
+        const now = deps.now();
+        // Core is contacted for a live record, or for a recent revocation whose sign-out may not have finished.
+        if (held.expiresAt > now) {
+          await records.saveSharedSignIn({ hash, sharedSignIn: { ...held, expiresAt: 0, revokedAt: now } });
+          return held.accountId;
+        }
+        if (isRetryable(held, now)) return held.accountId;
+        await records.deleteSharedSignIn(hash);
+        return null;
       });
     },
   };
@@ -131,6 +150,10 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       return { ...completed, signIn: authenticated.signIn, expiresAt: authenticated.expiresAt };
     },
   };
+}
+
+function isRetryable(held: SharedSignIn, now: number): boolean {
+  return held.revokedAt !== undefined && now - held.revokedAt < REVOKED_RETRY_WINDOW;
 }
 
 function failed(previous: FailedAttempts | null, input: { now: number; maximum: number }): FailedAttempts {

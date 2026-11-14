@@ -31,11 +31,11 @@ const startAgainSchema = z.object({ client: z.string().min(1).max(256).optional(
 const revokeRequestSchema = z.object({ token: z.string().min(1).max(4096) });
 const script = await readFile(new URL('./adapters/http/assets/sign-in.js', import.meta.url), 'utf8');
 
-export function createService(deps: { identity: Identity; fleet: PersonFleets & AccountSessions; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number }) {
+export function createService(deps: { identity: Identity; fleet: PersonFleets & AccountSessions; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number; log?: (error: unknown) => void }) {
   const config = serviceConfigSchema.parse(deps.config);
   const server = Fastify({ logger: false, trustProxy: config.trustedProxy ?? false, bodyLimit: BODY_LIMIT_BYTES, requestTimeout: REQUEST_TIMEOUT_MS });
   const signIn = createSignIn(deps);
-  const signOut = createSignOut({ signIn, sessions: deps.fleet });
+  const signOut = createSignOut({ signIn, sessions: deps.fleet, log: deps.log ?? ((error) => { process.stderr.write(`Sign-in failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); }) });
   const token = createAccountToken({ ...deps, issuer: config.origin, signIn });
   const setup = createSetup(deps);
   const openableFleets = createOpenableFleets({ identity: deps.identity, signIn });
@@ -134,6 +134,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets & 
     const revoked = revokeRequestSchema.safeParse(request.body);
     if (!revoked.success) return reply.code(400).send({ error: 'invalid_request' });
     const result = await signOut(revoked.data.token);
+    if (result.kind === 'failed') return reply.code(500).send({ error: 'server_error' });
     return result.kind === 'unavailable' ? reply.code(503).send({ error: 'temporarily_unavailable' }) : {};
   });
   return { server, setup, signIn };

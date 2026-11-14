@@ -58,6 +58,8 @@ export interface PersonFleets {
 export interface SharedSignIn {
   readonly accountId: AccountId;
   readonly expiresAt: number;
+  /** Set when revoked: a retry of that sign-out may still end the account's core sessions for a short while. */
+  readonly revokedAt?: number;
 }
 
 export interface Authorization {
