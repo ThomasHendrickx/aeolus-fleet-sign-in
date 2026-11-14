@@ -100,6 +100,7 @@ export interface SignInSecrets {
 /** Each removal target remains durable until the remote side acknowledges it. */
 export interface CleanupTarget {
   readonly attempts: number;
+  readonly cursor: string | null;
   readonly id: string;
   readonly accountId: AccountId;
   readonly fleetId: FleetId | null;
@@ -109,5 +110,5 @@ export interface CleanupTarget {
 }
 
 export interface AccessCleanup {
-  acknowledge(target: CleanupTarget): Promise<boolean>;
+  acknowledge(target: CleanupTarget): Promise<boolean | { readonly cursor: string }>;
 }

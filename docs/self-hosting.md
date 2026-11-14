@@ -31,7 +31,7 @@ PORT=3000
 
 `CORE_URL` may be a private backend address if it reaches the same configured installation; the public origin and callback registrations must still be HTTPS. Every fleet id is the actual existing core id, not its display name. The local organisation value `local` is persisted with each opaque account; it is not an organisation administration feature.
 
-Core must have `INSTALLATION_TOKEN` configured, at least 32 characters, and `ACCOUNT_TOKEN_ISSUER=https://signin.example.test`. Core loads public keys from `https://signin.example.test/.well-known/jwks.json`; ensure it can reach that URL. The service checks `/api/version` before migrating or starting. A core build reporting `0.0.0` counts as a build from main, as the compatibility contract specifies. The installation token never travels to a console or gateway browser.
+Core must have `INSTALLATION_TOKEN` configured, at least 32 characters, and `ACCOUNT_TOKEN_ISSUER=https://signin.example.test`. Core loads public keys from `https://signin.example.test/.well-known/jwks.json`; ensure it can reach that URL. The service checks `/api/version` before serving or setup. Removal, recovery, reconciliation and migration can save local state while core is unavailable. A core build reporting `0.0.0` counts as a build from main, as the compatibility contract specifies. The installation token never travels to a console or gateway browser.
 
 Configure the console's existing server settings:
 
@@ -66,7 +66,7 @@ The person ship uses `person-<first 12 account-id characters>` and core's exact 
 
 Open the console's normal account entry and sign in using the setup email and password. Commission `researcher` as that account. A refused commission does not change ownership; a retry retains the original commission key. Use its starting prompt to crew it separately. Then open Bridge, reuse the shared sign-in, and use its existing question, opening acknowledgement and basket path. Setup's success does not claim gateway connectivity or agent execution.
 
-Argo's independent `aeolus-core sign-in` recovery entry remains unchanged and does not depend on this issuer. Server account reset/removal/recovery commands belong to the follow-up slices; restoring a backup is described below. Do not recreate a person account as a workaround for lost identity state.
+Argo's independent `aeolus-core sign-in` recovery entry remains unchanged and does not depend on this issuer. Trusted removal and account recovery are described below. Do not recreate a person account as a workaround for lost identity state.
 
 ## Image
 
@@ -76,7 +76,7 @@ Build the runnable image from this repository:
 docker buildx build --load -t aeolus-sign-in:local .
 ```
 
-The image runs as an unprivileged user and defaults to `serve`; `setup`, `migrate` and `keygen` use the same entrypoint. Mount protected server configuration, signing keys and a reachable dedicated Postgres database. Migrations run transactionally at process start; concurrent starts share a database advisory lock. An existing database migration is not re-applied.
+The image runs as an unprivileged user and defaults to `serve`; `setup`, `disable`, `remove-rights`, `recover`, `reconcile`, `migrate` and `keygen` use the same entrypoint. Mount protected server configuration, signing keys and a reachable dedicated Postgres database. Migrations run transactionally at process start; concurrent starts share a database advisory lock. An existing database migration is not re-applied.
 
 For example, after a protected env file and key mount exist, run setup using a private terminal. Choose a container uid/gid that owns the mounted 0600 key:
 
@@ -88,9 +88,18 @@ Serve with the same protected env and read-only key mount, exposing port 3000 on
 
 ## Backup, restore and signing rotation
 
-Keep protected backups of the sign-in database, server configuration and private signing material alongside the corresponding fleet backup. The database holds opaque account ids, email/display name, scrypt password hashes, the local organisation value, fleet grants, person mappings, pending provisioning, fixed-expiry shared sign-ins, authorization/code consumption and failed-attempt state. Database backup readers can impersonate people through restored server state, so restrict and encrypt those backups.
+Keep protected backups of the sign-in database, server configuration and private signing material alongside the corresponding fleet backup. The database holds opaque account ids, email/display name, scrypt password hashes, the local organisation value, fleet grants, person mappings, pending provisioning, durable cleanup targets and page cursors, fixed-expiry shared sign-ins, authorization/code consumption and failed-attempt state. Database backup readers can impersonate people through restored server state, so restrict and encrypt those backups.
 
-Restore the database and the same server configuration/keys on the matching installation before admitting browser traffic. Check core and issuer-key connectivity. Retry trusted setup with the original email and fleet to reconcile its existing installation person key, then verify the same person ship and history. Do not manufacture a new account id or commission a new person to repair a missing mapping. Restoring an old backup is not a guarantee that newer shared sign-in revocations are preserved; use the account recovery slice's procedure when available.
+Restore with browser ingress stopped, and stop every sign-in instance while restoring. Keep core/gateway access restricted until reconciliation and credential recovery are checked:
+
+1. Restore the fleet backup and corresponding sign-in database on the same installation. Restore the protected deployment configuration, organisation values, installation token and signing keys. Keep the original issuer address, fleet ids, account ids and person mappings. Do not start with an empty identity database or run setup to create replacement people.
+2. Run `migrate` with that protected configuration. This needs the sign-in database, not a healthy issuer or core. Check that configured public keys match the backed-up signing material and that core and gateway have the same installation token.
+3. Run `reconcile` until `No pending cleanup remains.` A pending result exits 1; repair unreachable/refused destinations and retry. Starting `serve` also resumes durable retries, one target at a time, with no overlapping worker attempts in one process. Restored work can replay already completed remote operations; they are safe to repeat. Acknowledgements and partial page cursors are committed to the database.
+4. Treat sessions in an older backup as potentially revoked after that backup was made. For each restored account, run `disable --account <saved-account-id>` before admitting browser traffic, then reconcile every pending target. This revokes restored shared sign-ins, cuts off old account tokens and invalidates gateway access. Reapply any removals that happened after the backup; a backup cannot reconstruct later rights decisions. Obtain saved ids and requested fleet-manager rights from protected backup records, never from a new account.
+5. Run `recover --account <saved-account-id> --enable --fleet <existing-fleet-id> --fleet-manager` privately for the person whose account and manager access are explicitly being restored. Enter a new password through private input. Omit `--enable` to leave a disabled account disabled; omit both fleet flags to leave rights unchanged. Recovery refuses while earlier cleanup is unacknowledged. It resets the credential on the same identity, revokes old shared sign-ins and retains the person mapping. No argo permission is granted.
+6. Before opening browser ingress, check the same account id and person ship against the protected backup and core history. Sign in normally, obtain a fresh fleet token and check the same person ship and Bridge history. Released agents require crews again. Repeat this restore walk on an isolated installation when testing backups; a stored dump alone does not prove recovery.
+
+Do not manufacture a new account id or person commission key to repair a missing mapping. Enabled fleet managers reconcile the existing `person-<account id>` key when obtaining their next token. Restored pending setup can resume only where access has not been removed. Private signing material, installation credentials and dumps must stay encrypted and access-restricted in backup storage. Store configuration and key backups separately from public repository and image artifacts.
 
 Rotate keys through protected server configuration:
 
@@ -116,6 +125,34 @@ Argo's independent server sign-in remains available for recovery. Shared sign-ou
 
 ## Data access and validation
 
-This first-person service does not read message history or scan the fleet's ships. Account/email, account id, fleet grant and all shared sign-in, authorization, code and attempt keys use indexed lookups; app discovery reads only the manually registered fleets. Short identity transitions are serialized within this installation, including code consumption and failed-attempt counters. Password hashing and external provisioning have explicit ports; failed state transactions roll back.
+This first-person service does not read message history. Disabling scans trierarchs in database-paginated pages of 20 at core, checks their owner and releases only this person's trierarch app ships. Cleanup cursors and retries are durable; the design target is 3,000 ships per fleet. Account/email, account id, fleet grant and all shared sign-in, authorization, code and attempt keys use indexed lookups; app discovery reads only the manually registered fleets. Short identity transitions are serialized within this installation, including code consumption and failed-attempt counters. Password hashing and external provisioning have explicit ports; failed state transactions roll back.
 
 Tests prove the service's code/cookie/refusal boundary, Postgres concurrency/rollback/restart, real-browser form states and the HTTPS issuer/released-core person-to-agent path. A deployed console and Bridge walk is coordinated across repositories; it is not inferred from a service-only test.
+
+
+## Remove access and recover the same account
+
+Run these commands on the trusted server with the same protected configuration as the service. The account id is the saved opaque id in the protected database, never the email. Removal does not require an interactive terminal or functioning issuer keys. A core or gateway outage leaves local removal saved and remote cleanup pending.
+
+```sh
+aeolus-sign-in disable --account <saved-account-id>
+aeolus-sign-in remove-rights --account <saved-account-id> --fleet <existing-fleet-id>
+aeolus-sign-in reconcile
+```
+
+`disable` stops the account across the installation and removes its fleet rights. `remove-rights` removes only the selected fleet's rights, without an installation-wide core cut-off. Both revoke the account's shared sign-ins in one transaction with the removal and retry records. Mapping, person history, ownership and owner question routing remain. An unavailable target does not block attempts at other targets. The command reports pending cleanup with exit 1 until every target acknowledges; `serve` continues retrying after restart. Multiple instances serialize changes and acknowledgements through the database.
+
+Disable calls core's installation-wide cut-off, which also ends account-linked argo console sessions. Fleet cleanup clears the person ship's installation-owned group labels and releases its crew when rights no longer permit messaging or owning. Disable additionally releases owned trierarch app ships; core release ends leases they crewed. Ordinary owned agents stay. All issued account tokens have argo false; recovery does not add argo permission. Nothing retires and recommissions a person ship.
+
+Gateway must serve `POST /trpc/installation.accountDisabled` with the server-only `x-aeolus-installation-token` and `{fleetId, accountId}`, once per affected fleet. A validated OK acknowledges the existing repeatable operation. The gateway must immediately clear cached authorisation and reject the affected human access, including through a retained person crew; this is the gateway #363 integration contract. A lost notification cannot extend browser access past the current 10-minute account token and the existing 30-second allowance without renewal. A person crew token by itself cannot authorise browser entry. This service's notification test does not prove the deployed gateway enforces those rules.
+
+For credential loss, run recovery privately:
+
+```sh
+aeolus-sign-in recover --account <saved-account-id>
+aeolus-sign-in recover --account <saved-account-id> --enable --fleet <existing-fleet-id> --fleet-manager
+```
+
+The first command resets only the credential and revokes old shared sign-ins. The second explicitly enables the account and restores the requested fleet-manager grant, reconciled against offered scopes and the same person commission key at the next account-token exchange. Passwords require at least 15 characters, are read privately, and are never command arguments or pipeline input. Recovery will not bypass pending removal. Retrying setup does not restore removed access.
+
+If the issuer is unavailable or the only person account is disabled, run `aeolus-core sign-in` on the trusted server and open its fresh one-use argo link privately. Core refuses this command with zero or multiple fleets. Expired or already used links require a new link. Independent argo recovery does not reset a credential held by this service; repair deployment or restore protected identity state, then use the recovery command. Without trusted server access or recoverable identity state, there is no bypass.

@@ -3,6 +3,7 @@ ALTER TABLE accounts ADD COLUMN access_version INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE cleanup_targets (
   id TEXT PRIMARY KEY,
   attempts INTEGER NOT NULL DEFAULT 0,
+  cursor TEXT,
   account_id TEXT NOT NULL,
   fleet_id TEXT,
   person_ship_id TEXT,

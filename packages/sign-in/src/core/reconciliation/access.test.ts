@@ -3,17 +3,19 @@ import { describe, expect, it } from 'vitest';
 
 import { memoryIdentity } from '../../../test/support/memory-identity.js';
 import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
+import { createSignIn } from '../sign-in/sign-in.js';
 import { createSetup } from '../accounts/setup.js';
 import { createAccess } from './access.js';
 
 async function aRemoval() {
   const identity = memoryIdentity();
   const setup = aSetup();
-  await createSetup({ identity, fleet: fleetOfMaya(), secrets: setup.secrets }).establish(setup.input);
+  const secrets = { ...setup.secrets, hashPassword: (password: string) => Promise.resolve(`hash:${password}`) };
+  await createSetup({ identity, fleet: fleetOfMaya(), secrets }).establish(setup.input);
   const accountId = setup.secrets.accountId();
   const acknowledged = new Set<string>();
   let isUnavailable = true;
-  const access = createAccess({ identity, secrets: setup.secrets, cleanup: { acknowledge(target) {
+  const access = createAccess({ identity, secrets, cleanup: { acknowledge(target) {
     if (isUnavailable) return Promise.resolve(false);
     acknowledged.add(`${target.kind}/${target.fleetId ?? 'installation'}`);
     return Promise.resolve(true);
@@ -70,7 +72,13 @@ describe('durable access removal and recovery', () => {
     given.available();
     while ((await given.access.reconcile()).kind === 'pending') { /* bounded single-target retries */ }
     expect(given.acknowledged).toEqual(new Set(['cutOff/installation', `fleet/${given.fleetId}`, `gateway/${given.fleetId}`]));
+    expect(await given.access.recover({ accountId: given.accountId, password: 'replacement-password', shouldEnable: false, fleetId: null })).toEqual({ kind: 'recovered' });
+    expect(await given.identity.transaction((records) => records.accountById(given.accountId))).toMatchObject({ isDisabled: true });
     expect(await given.access.recover({ accountId: given.accountId, password: 'replacement-password', shouldEnable: true, fleetId: null })).toEqual({ kind: 'recovered' });
+    const signIn = createSignIn({ identity: given.identity, now: () => 1000, secrets: { token: () => 'new-shared-session', digest: (value) => Promise.resolve(value), verifyPassword: ({ password, hash }) => Promise.resolve(hash === `hash:${password}`) } });
+    expect(await signIn.authenticate({ email: aSetup().input.email, password: aSetup().input.password, address: 'browser' })).toEqual({ kind: 'wrongCredential' });
+    expect((await signIn.authenticate({ email: aSetup().input.email, password: 'replacement-password', address: 'browser' })).kind).toBe('authenticated');
+
     expect(await given.identity.transaction((records) => records.accountById(given.accountId))).toMatchObject({ id: given.accountId, isDisabled: false });
     expect(await given.identity.transaction((records) => records.right({ accountId: given.accountId, fleetId: given.fleetId }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001', scopes: [], isFleetManager: false });
   });

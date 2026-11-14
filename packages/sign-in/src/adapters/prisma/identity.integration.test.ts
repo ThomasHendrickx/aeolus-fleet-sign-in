@@ -114,7 +114,7 @@ describe('access cleanup durability', () => {
     if (original === null) throw new Error('Expected Maya');
     await expect(database.identity.transaction(async (records) => {
       await records.saveAccount({ ...original, isDisabled: true });
-      await records.saveCleanup({ id: 'rollback', attempts: 0, accountId, fleetId: null, personShipId: null, kind: 'cutOff', shouldReleaseOwnedTrierarchs: true });
+      await records.saveCleanup({ id: 'rollback', attempts: 0, cursor: null, accountId, fleetId: null, personShipId: null, kind: 'cutOff', shouldReleaseOwnedTrierarchs: true });
       throw new Error('Interrupted removal');
     })).rejects.toThrow('Interrupted removal');
     expect(await database.identity.transaction((records) => records.pendingCleanup())).toBeNull();
@@ -124,9 +124,14 @@ describe('access cleanup durability', () => {
     // When concurrent commands remove access and the service restarts before acknowledgement.
     await Promise.all([unavailable.remove({ accountId, fleetId: null }), unavailable.remove({ accountId, fleetId: null })]);
     await unavailable.reconcile();
+    const acknowledged = new Set<string>();
+    const interrupted = createAccess({ identity: { transaction: (work) => database.identity.transaction(async (records) => {
+      await work(records);
+      throw new Error('Lost acknowledgement transaction');
+    }) }, secrets: setup.secrets, cleanup: { acknowledge: (target) => { acknowledged.add(target.id); return Promise.resolve(true); } } });
+    await expect(interrupted.reconcile()).rejects.toThrow('Lost acknowledgement transaction');
     await database.close();
     database = await openIdentity(container.getConnectionUri());
-    const acknowledged = new Set<string>();
     const restarted = createAccess({ identity: database.identity, secrets: setup.secrets, cleanup: { acknowledge: (target) => { acknowledged.add(target.id); return Promise.resolve(true); } } });
     while ((await restarted.reconcile()).kind === 'pending') await Promise.all([restarted.reconcile(), restarted.reconcile()]);
 

@@ -42,6 +42,7 @@ model IdentityRecord {
 
 model CleanupTarget {
   attempts Int @default(0)
+  cursor String?
   id String @id
   accountId String @map("account_id")
   fleetId String? @map("fleet_id")

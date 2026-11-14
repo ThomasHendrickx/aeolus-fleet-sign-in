@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { Account, FleetRight, Identity, IdentityRecords } from '../../core/shared/identity.js';
 import { PrismaClient, type Prisma } from './generated/client.js';
 
-const cleanupSchema = z.object({ attempts: z.number().int().nonnegative(), id: z.string(), accountId: accountIdSchema, fleetId: idSchema('fleet').nullable(), personShipId: idSchema('ship').nullable(), kind: z.enum(['cutOff', 'fleet', 'gateway']), shouldReleaseOwnedTrierarchs: z.boolean() });
+const cleanupSchema = z.object({ cursor: z.string().nullable(), attempts: z.number().int().nonnegative(), id: z.string(), accountId: accountIdSchema, fleetId: idSchema('fleet').nullable(), personShipId: idSchema('ship').nullable(), kind: z.enum(['cutOff', 'fleet', 'gateway']), shouldReleaseOwnedTrierarchs: z.boolean() });
 const sharedSignInSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number(), revokedAt: z.number().optional() });
 const authorizationSchema = z.object({ clientId: z.string(), redirectUri: z.string(), state: z.string(), codeChallenge: z.string(), browser: z.string(), expiresAt: z.number() });
 const codeSchema = z.object({ clientId: z.string(), redirectUri: z.string(), codeChallenge: z.string(), signInHash: z.string(), expiresAt: z.number() });

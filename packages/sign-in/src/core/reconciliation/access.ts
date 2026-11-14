@@ -13,7 +13,7 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
       await records.saveAccount({ ...account, accessVersion, isDisabled: input.fleetId === null || account.isDisabled });
       await records.revokeSharedSignIns(account.id);
       const rights = await records.rights(account.id);
-      const save = (target: Omit<CleanupTarget, 'id' | 'accountId' | 'shouldReleaseOwnedTrierarchs' | 'attempts'>) => records.saveCleanup({ ...target, attempts: 0, accountId: account.id, id: `${account.id}/${accessVersion}/${target.kind}/${target.fleetId ?? 'installation'}`, shouldReleaseOwnedTrierarchs: input.fleetId === null });
+      const save = (target: Omit<CleanupTarget, 'id' | 'accountId' | 'shouldReleaseOwnedTrierarchs' | 'attempts' | 'cursor'>) => records.saveCleanup({ ...target, attempts: 0, cursor: null, accountId: account.id, id: `${account.id}/${accessVersion}/${target.kind}/${target.fleetId ?? 'installation'}`, shouldReleaseOwnedTrierarchs: input.fleetId === null });
       if (input.fleetId === null) await save({ kind: 'cutOff', fleetId: null, personShipId: null });
       for (const right of rights.filter((right) => input.fleetId === null || right.fleetId === input.fleetId)) {
         await records.saveRight({ ...right, scopes: [], groupValues: [], isFleetManager: false });
@@ -26,11 +26,11 @@ export function createAccess(deps: { identity: Identity; secrets: Secrets; clean
     reconcile: () => deps.identity.transaction(async (records) => {
       const target = await records.pendingCleanup();
       if (target === null) return { kind: 'complete' as const };
-      let isAcknowledged: boolean;
-      try { isAcknowledged = await deps.cleanup.acknowledge(target); }
-      catch { isAcknowledged = false; }
-      if (isAcknowledged) await records.deleteCleanup(target.id);
-      else await records.saveCleanup({ ...target, attempts: target.attempts + 1 });
+      let outcome: boolean | { readonly cursor: string };
+      try { outcome = await deps.cleanup.acknowledge(target); }
+      catch { outcome = false; }
+      if (outcome === true) await records.deleteCleanup(target.id);
+      else await records.saveCleanup({ ...target, attempts: target.attempts + 1, cursor: typeof outcome === 'object' ? outcome.cursor : target.cursor });
       return { kind: 'pending' as const };
     }),
     recover: async (input: { accountId: AccountId; password: string; shouldEnable: boolean; fleetId: FleetId | null }) => {

@@ -40,7 +40,7 @@ export function createCoreCleanup(options: { url: string; installationToken: str
           labelWriteOutputSchema.parse(await call({ path: 'fleet.unassignLabel', fleetId, body: { shipId: person.id, valueId: label.valueId } }));
         }
         if (person.status === 'crewed') await release(person.id);
-        if (target.shouldReleaseOwnedTrierarchs) await releaseOwned({ target, list, release });
+        if (target.shouldReleaseOwnedTrierarchs) return await releaseOwned({ target, list, release });
         return true;
       } catch { return false; }
     },
@@ -48,13 +48,10 @@ export function createCoreCleanup(options: { url: string; installationToken: str
 }
 
 async function releaseOwned(input: { target: CleanupTarget; list: (query: unknown) => Promise<z.infer<typeof fleetListOutputSchema>>; release: (shipId: ShipId) => Promise<void> }) {
-  let cursor: string | null = null;
-  do {
-    const page = await input.list({ kind: ['trierarch'], limit: PAGE_SIZE, ...(cursor === null ? {} : { cursor }) });
-    for (const ship of page.items) {
-      if (!('ownerShipId' in ship)) throw new Error('Installation could not read a trierarch owner');
-      if (ship.ownerShipId === input.target.personShipId && ship.status === 'crewed') await input.release(ship.id);
-    }
-    cursor = page.nextCursor;
-  } while (cursor !== null);
+  const page = await input.list({ kind: ['trierarch'], limit: PAGE_SIZE, ...(input.target.cursor === null ? {} : { cursor: input.target.cursor }) });
+  for (const ship of page.items) {
+    if (!('ownerShipId' in ship)) throw new Error('Installation could not read a trierarch owner');
+    if (ship.ownerShipId === input.target.personShipId && ship.status === 'crewed') await input.release(ship.id);
+  }
+  return page.nextCursor === null ? true : { cursor: page.nextCursor };
 }

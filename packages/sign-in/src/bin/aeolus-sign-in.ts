@@ -40,36 +40,36 @@ async function main() {
     return;
   }
   try {
-  await fleet.checkCompatibility();
-  const keys = await Promise.all(config.signingKeys.map(async (key) => {
-    if (((await stat(key.file)).mode & 0o077) !== 0) throw new Error('Signing keys must be private');
-    return { id: key.id, privateKey: createPrivateKey(await readFile(key.file, 'utf8')) };
-  }));
-  const signer = createSigner({ keys, activeKeyId: config.activeKeyId });
-  const service = createService({ identity: database.identity, fleet, signer, secrets: createSecrets(), now: () => Date.now(), config: config.service });
-  if (args[0] === 'setup') {
-    try {
-      const fleetId = args.length === 1 && config.service.fleets.length === 1 ? config.service.fleets[0]?.id : args.length === 3 && args[1] === '--fleet' ? idSchema('fleet').parse(args[2]) : undefined;
-      const fleet = config.service.fleets.find((registered) => registered.id === fleetId);
-      if (fleet === undefined) throw new Error('Choose a configured fleet');
-      process.exitCode = await runSetup({ fleet, terminal: privateTerminal(), setup: service.setup });
-    } finally { await service.server.close(); await database.close(); }
-    return;
-  }
-  await service.server.listen({ host: '0.0.0.0', port: config.port });
-  process.stdout.write('Aeolus sign-in is listening behind its configured HTTPS origin.\n');
-  let isClosing = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let work = Promise.resolve();
-  const retry = () => {
-    work = access.reconcile().then(() => undefined).catch(() => {
-      process.stderr.write('Cleanup is still pending. Check the server configuration and retry reconciliation.\n');
-    }).finally(() => { if (!isClosing) timer = setTimeout(retry, 1000); });
-  };
-  retry();
-  const close = async () => { isClosing = true; clearTimeout(timer); await work; await service.server.close(); await database.close(); };
-  process.once('SIGTERM', () => { void close(); });
-  process.once('SIGINT', () => { void close(); });
+    await fleet.checkCompatibility();
+    const keys = await Promise.all(config.signingKeys.map(async (key) => {
+      if (((await stat(key.file)).mode & 0o077) !== 0) throw new Error('Signing keys must be private');
+      return { id: key.id, privateKey: createPrivateKey(await readFile(key.file, 'utf8')) };
+    }));
+    const signer = createSigner({ keys, activeKeyId: config.activeKeyId });
+    const service = createService({ identity: database.identity, fleet, signer, secrets: createSecrets(), now: () => Date.now(), config: config.service });
+    if (args[0] === 'setup') {
+      try {
+        const fleetId = args.length === 1 && config.service.fleets.length === 1 ? config.service.fleets[0]?.id : args.length === 3 && args[1] === '--fleet' ? idSchema('fleet').parse(args[2]) : undefined;
+        const fleet = config.service.fleets.find((registered) => registered.id === fleetId);
+        if (fleet === undefined) throw new Error('Choose a configured fleet');
+        process.exitCode = await runSetup({ fleet, terminal: privateTerminal(), setup: service.setup });
+      } finally { await service.server.close(); await database.close(); }
+      return;
+    }
+    await service.server.listen({ host: '0.0.0.0', port: config.port });
+    process.stdout.write('Aeolus sign-in is listening behind its configured HTTPS origin.\n');
+    let isClosing = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let work = Promise.resolve();
+    const retry = () => {
+      work = access.reconcile().then(() => undefined).catch(() => {
+        process.stderr.write('Cleanup is still pending. Check the server configuration and retry reconciliation.\n');
+      }).finally(() => { if (!isClosing) timer = setTimeout(retry, 1000); });
+    };
+    retry();
+    const close = async () => { isClosing = true; clearTimeout(timer); await work; await service.server.close(); await database.close(); };
+    process.once('SIGTERM', () => { void close(); });
+    process.once('SIGINT', () => { void close(); });
   } catch (error) { await database.close(); throw error; }
 }
 
