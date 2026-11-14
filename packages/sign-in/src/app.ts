@@ -24,7 +24,7 @@ const script = await readFile(new URL('./adapters/http/assets/sign-in.js', impor
 
 export function createService(deps: { identity: Identity; fleet: PersonFleets; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number }) {
   const config = serviceConfigSchema.parse(deps.config);
-  const server = Fastify({ logger: false, bodyLimit: 16_384, requestTimeout: 15_000 });
+  const server = Fastify({ logger: false, trustProxy: config.trustedProxy ?? false, bodyLimit: 16_384, requestTimeout: 15_000 });
   const signIn = createSignIn(deps);
   const token = createAccountToken({ ...deps, issuer: config.origin, signIn });
   const setup = createSetup(deps);
