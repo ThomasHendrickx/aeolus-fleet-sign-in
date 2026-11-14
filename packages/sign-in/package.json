@@ -1,0 +1,18 @@
+{
+  "name": "@aeolus-fleet/sign-in",
+  "version": "0.0.0",
+  "description": "Aeolus sign-in: signs people in to a self-hosted Aeolus fleet.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasHendrickx/aeolus-fleet-sign-in.git",
+    "directory": "packages/sign-in"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomasHendrickx/aeolus-fleet/issues"
+  },
+  "engines": {
+    "node": ">=26"
+  }
+}
