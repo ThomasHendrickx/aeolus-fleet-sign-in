@@ -22,6 +22,25 @@ async function aRemoval() {
 }
 
 describe('durable access removal and recovery', () => {
+  it('retries every target even while another target is unavailable', async () => {
+    // Given core unavailable and gateway able to acknowledge removal.
+    const given = await aRemoval();
+    const gateway = new Set<string>();
+    const access = createAccess({ identity: given.identity, secrets: aSetup().secrets, cleanup: { acknowledge: (target) => {
+      if (target.kind !== 'gateway') return Promise.resolve(false);
+      gateway.add(target.accountId);
+      return Promise.resolve(true);
+    } } });
+
+    // When the worker retries a bounded batch.
+    await access.remove({ accountId: given.accountId, fleetId: null });
+    await access.reconcile(); await access.reconcile(); await access.reconcile();
+
+    // Then core remains pending without starving gateway invalidation.
+    expect(gateway).toEqual(new Set([given.accountId]));
+    expect(await given.identity.transaction((records) => records.pendingCleanup())).not.toBeNull();
+  });
+
   it('disables the account atomically and retries all cleanup before recovery of the same identity', async () => {
     // Given Maya with a stable person ship and a shared sign-in.
     const given = await aRemoval();
