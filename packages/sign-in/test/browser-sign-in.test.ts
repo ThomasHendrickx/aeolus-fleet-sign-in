@@ -10,7 +10,7 @@ import { createService } from '../src/app.js';
 import { createSecrets } from '../src/adapters/crypto/secrets.js';
 import { createSigner } from '../src/adapters/crypto/signer.js';
 import { approvedNotice, noticeIn } from './support/approved-mockups.js';
-import { aSetup, fleetOfMaya } from './support/setup-fixtures.js';
+import { aSetup, FIXTURE_PASSWORD_COST, fleetOfMaya } from './support/setup-fixtures.js';
 import { memoryIdentity } from './support/memory-identity.js';
 
 const origin = 'https://signin.example.test';
@@ -22,7 +22,7 @@ async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: st
   const { shouldSetUp = true, trustedProxy, now = () => Date.now(), isUnavailable = () => false } = options;
   const identity = memoryIdentity();
   const fleet = fleetOfMaya(identity);
-  const real = createSecrets();
+  const real = createSecrets({ passwordCost: FIXTURE_PASSWORD_COST });
   const secrets = { ...real, verifyPassword: (input: { password: string; hash: string | null }) => isUnavailable() ? Promise.reject(new Error('Credential processing failed')) : real.verifyPassword(input) };
   const { privateKey } = generateKeyPairSync('ed25519');
   const signer = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });

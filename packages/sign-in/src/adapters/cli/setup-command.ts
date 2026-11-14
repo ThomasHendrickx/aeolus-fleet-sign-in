@@ -2,6 +2,7 @@
 import type { FleetId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
+import { MINIMUM_PASSWORD_LENGTH } from '../../core/accounts/password.js';
 import type { createSetup } from '../../core/accounts/setup.js';
 
 export interface PrivateTerminal {
@@ -12,6 +13,7 @@ export interface PrivateTerminal {
 }
 
 type Setup = ReturnType<typeof createSetup>;
+const MAXIMUM_PASSWORD_LENGTH = 1024;
 type Provisioned = Awaited<ReturnType<Setup['resume']>>;
 
 export async function runSetup(input: { fleet: { id: FleetId; name: string }; terminal: PrivateTerminal; setup: Setup }): Promise<number> {
@@ -37,8 +39,8 @@ export async function runSetup(input: { fleet: { id: FleetId; name: string }; te
   const displayName = await terminal.prompt('Display name');
   const email = await terminal.prompt('Email');
   const password = await terminal.privatePassword();
-  const parsed = z.object({ displayName: z.string().trim().min(1).max(200), email: z.email().max(320), password: z.string().min(1).max(1024) }).safeParse({ displayName, email, password });
-  if (!parsed.success) { terminal.write('A display name, email and password are required.'); return 1; }
+  const parsed = z.object({ displayName: z.string().trim().min(1).max(200), email: z.email().max(320), password: z.string().min(MINIMUM_PASSWORD_LENGTH).max(MAXIMUM_PASSWORD_LENGTH) }).safeParse({ displayName, email, password });
+  if (!parsed.success) { terminal.write(`A display name, email and a password of at least ${String(MINIMUM_PASSWORD_LENGTH)} characters are required.`); return 1; }
   const established = await setup.establish({ ...parsed.data, fleetId: fleet.id });
   terminal.write('');
   if (established.kind === 'pending') return refused({ terminal, fleet, provisioned: established });

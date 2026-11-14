@@ -28,3 +28,6 @@ export function fleetOfMaya(identity: Identity) {
   };
   return fleet;
 }
+
+/** Node's default scrypt work: tests that make many credential attempts stay within their time limits. */
+export const FIXTURE_PASSWORD_COST = { log2N: 14, r: 8, p: 1 };

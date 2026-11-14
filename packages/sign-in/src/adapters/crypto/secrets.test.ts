@@ -22,8 +22,8 @@ describe('password hashing', () => {
   it('verifies a hash by the parameters stored in it', async () => {
     // Given a hash made with other parameters.
     const salt = randomBytes(16).toString('base64url');
-    const derived = scryptSync('private-password', salt, 64, { N: 2 ** 15, r: 8, p: 2 }).toString('base64url');
-    const hash = `scrypt$ln=15,r=8,p=2$${salt}$${derived}`;
+    const derived = scryptSync('private-password', salt, 64, { N: 2 ** 14, r: 4, p: 2 }).toString('base64url');
+    const hash = `scrypt$ln=14,r=4,p=2$${salt}$${derived}`;
 
     // When Maya's password is checked against it.
     const isAccepted = await createSecrets().verifyPassword({ password: 'private-password', hash });
