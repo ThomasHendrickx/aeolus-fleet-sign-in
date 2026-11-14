@@ -12,6 +12,7 @@ export function memoryIdentity() {
   const attempts = new Map<string, FailedAttempts>();
   let previous: Promise<unknown> = Promise.resolve();
   const records: IdentityRecords = {
+    hasAccounts: () => Promise.resolve(accounts.size > 0),
     session: (hash) => Promise.resolve(sessions.get(hash) ?? null),
     saveSession: ({ hash, session }) => { sessions.set(hash, session); return Promise.resolve(); },
     deleteSession: (hash) => { sessions.delete(hash); return Promise.resolve(); },

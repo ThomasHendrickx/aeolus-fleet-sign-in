@@ -15,12 +15,12 @@ export function createSetup(deps: { identity: Identity; fleet: PersonFleets; sec
     try {
       const account = await deps.identity.transaction(async (records) => {
         const existing = await records.account(input.email);
-        if (existing !== null) return existing;
-        const created = {
+        const created = existing ?? {
           id: deps.secrets.accountId(), email: input.email, displayName: input.displayName,
           passwordHash: await deps.secrets.hashPassword(input.password), organisationId: 'local',
         };
-        await records.saveAccount(created);
+        if (existing === null) await records.saveAccount(created);
+        if (await records.right({ accountId: created.id, fleetId: input.fleetId }) === null) await records.saveRight({ accountId: created.id, fleetId: input.fleetId, personShipId: null, scopes: [], groupValues: [], isFleetManager: true });
         return created;
       });
       return await provision(account.id, input.fleetId);

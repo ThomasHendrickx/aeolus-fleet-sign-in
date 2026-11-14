@@ -12,7 +12,7 @@ import { PrismaClient, type Prisma } from './generated/client.js';
 const sessionSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number() });
 const authorizationSchema = z.object({ clientId: z.string(), redirectUri: z.string(), state: z.string(), codeChallenge: z.string(), browser: z.string(), expiresAt: z.number() });
 const codeSchema = z.object({ clientId: z.string(), redirectUri: z.string(), codeChallenge: z.string(), signInHash: z.string(), expiresAt: z.number() });
-const attemptsSchema = z.object({ since: z.number(), failures: z.number(), refusedUntil: z.number() });
+const attemptsSchema = z.object({ failures: z.array(z.number()), refusedUntil: z.number() });
 
 export async function openIdentity(databaseUrl: string) {
   await migrate(databaseUrl);
@@ -32,6 +32,7 @@ function recordsOf(client: Prisma.TransactionClient): IdentityRecords {
   const save = async (key: string, data: Prisma.InputJsonObject) => { await client.identityRecord.upsert({ where: { key }, create: { key, data }, update: { data } }); };
   const remove = async (key: string) => { await client.identityRecord.deleteMany({ where: { key } }); };
   return {
+    hasAccounts: async () => await client.account.findFirst({ select: { id: true } }) !== null,
     account: async (email) => accountOf(await client.account.findUnique({ where: { email } })),
     accountById: async (id) => accountOf(await client.account.findUnique({ where: { id } })),
     saveAccount: async (account) => { await client.account.upsert({ where: { id: account.id }, create: account, update: account }); },

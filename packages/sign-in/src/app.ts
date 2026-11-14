@@ -49,6 +49,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets; s
     const input = parsed.data;
     const client = config.clients.find((candidate) => candidate.id === input.client_id && candidate.redirectUri === input.redirect_uri);
     if (client === undefined) return invalidConfiguration(reply);
+    if (!await deps.identity.transaction((records) => records.hasAccounts())) return reply.code(503).type('text/html').send(refusalPage({ heading: 'Sign-in is not ready', text: 'The person who runs this installation must finish setup on the server before you can sign in.' }));
     const browser = cookiesOf(request)[browserCookie] ?? deps.secrets.token();
     reply.header('set-cookie', cookie({ name: browserCookie, value: browser, seconds: 600 }));
     const flow = await signIn.begin({ clientId: client.id, redirectUri: client.redirectUri, state: input.state, codeChallenge: input.code_challenge, browser });

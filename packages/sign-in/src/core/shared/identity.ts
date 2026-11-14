@@ -19,6 +19,7 @@ export interface FleetRight {
 }
 
 export interface IdentityRecords {
+  hasAccounts(): Promise<boolean>;
   account(email: string): Promise<Account | null>;
   accountById(id: AccountId): Promise<Account | null>;
   saveAccount(account: Account): Promise<void>;
@@ -75,8 +76,7 @@ export interface AuthorizationCode {
 }
 
 export interface FailedAttempts {
-  readonly since: number;
-  readonly failures: number;
+  readonly failures: readonly number[];
   readonly refusedUntil: number;
 }
 

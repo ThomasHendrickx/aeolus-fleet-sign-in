@@ -21,7 +21,7 @@ export function createAccountToken(deps: { identity: Identity; fleet: PersonFlee
       if (shared.kind === 'signedOut') return shared;
       const { account } = shared;
       const right = await deps.identity.transaction((records) => records.right({ accountId: account.id, fleetId: input.fleetId }));
-      if (right === null || right.scopes.length === 0) return { kind: 'noRights' as const };
+      if (right === null || (right.scopes.length === 0 && !right.isFleetManager)) return { kind: 'noRights' as const };
       const reconciled = right.isFleetManager ? await deps.fleet.reconcile({ accountId: account.id, fleetId: input.fleetId }) : right;
       await deps.identity.transaction((records) => records.saveRight(reconciled));
       const issuedAt = Math.floor(deps.now() / MILLISECONDS);

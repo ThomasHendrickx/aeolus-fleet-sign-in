@@ -91,7 +91,6 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
 }
 
 function failed(previous: FailedAttempts | null, input: { now: number; maximum: number }): FailedAttempts {
-  const isOld = previous === null || previous.since + ATTEMPT_WINDOW <= input.now;
-  const failures = (isOld ? 0 : previous.failures) + 1;
-  return { since: isOld ? input.now : previous.since, failures, refusedUntil: failures >= input.maximum ? input.now + ATTEMPT_WINDOW : 0 };
+  const failures = [...(previous?.failures ?? []).filter((at) => at > input.now - ATTEMPT_WINDOW), input.now];
+  return { failures, refusedUntil: failures.length >= input.maximum ? input.now + ATTEMPT_WINDOW : 0 };
 }
