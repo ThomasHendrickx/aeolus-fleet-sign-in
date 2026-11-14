@@ -19,11 +19,9 @@ describe('the released core person lifecycle', () => {
   it('resolves the existing fleet, grants all offered scopes and retries the installation person commission without duplication', async () => {
     // Given a fresh released core installation with one existing fleet.
     const postgres = await new PostgreSqlContainer('postgres:17-alpine').start();
-    const coreBin = new URL('../../node_modules/@aeolus-fleet/core/dist/bin/aeolus-core.js', new URL('../../../../../../', import.meta.url));
     const require = createRequire(import.meta.url);
     const packageEntry = require.resolve('@aeolus-fleet/core');
     const executable = new URL('./bin/aeolus-core.js', `file://${packageEntry}`).pathname;
-    void coreBin;
     const databaseUrl = postgres.getConnectionUri();
     let core: ReturnType<typeof createApp> | undefined;
     try {
