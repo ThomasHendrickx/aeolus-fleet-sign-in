@@ -99,6 +99,7 @@ export interface SignInSecrets {
 
 /** Each removal target remains durable until the remote side acknowledges it. */
 export interface CleanupTarget {
+  readonly attempts: number;
   readonly id: string;
   readonly accountId: AccountId;
   readonly fleetId: FleetId | null;

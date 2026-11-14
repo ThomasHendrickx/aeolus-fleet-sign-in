@@ -114,7 +114,7 @@ describe('access cleanup durability', () => {
     if (original === null) throw new Error('Expected Maya');
     await expect(database.identity.transaction(async (records) => {
       await records.saveAccount({ ...original, isDisabled: true });
-      await records.saveCleanup({ id: 'rollback', accountId, fleetId: null, personShipId: null, kind: 'cutOff', shouldReleaseOwnedTrierarchs: true });
+      await records.saveCleanup({ id: 'rollback', attempts: 0, accountId, fleetId: null, personShipId: null, kind: 'cutOff', shouldReleaseOwnedTrierarchs: true });
       throw new Error('Interrupted removal');
     })).rejects.toThrow('Interrupted removal');
     expect(await database.identity.transaction((records) => records.pendingCleanup())).toBeNull();

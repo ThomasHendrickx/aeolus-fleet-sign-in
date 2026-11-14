@@ -15,7 +15,7 @@ export function memoryIdentity() {
   const records: IdentityRecords = {
     rights: (accountId) => Promise.resolve([...rights.values()].filter((right) => right.accountId === accountId)),
     revokeSharedSignIns: (accountId) => { for (const [hash, shared] of sharedSignIns) if (shared.accountId === accountId) sharedSignIns.delete(hash); return Promise.resolve(); },
-    pendingCleanup: (accountId) => Promise.resolve([...cleanup.values()].find((target) => accountId === undefined || target.accountId === accountId) ?? null),
+    pendingCleanup: (accountId) => Promise.resolve([...cleanup.values()].sort((left, right) => left.attempts - right.attempts).find((target) => accountId === undefined || target.accountId === accountId) ?? null),
     saveCleanup: (target) => { cleanup.set(target.id, target); return Promise.resolve(); },
     deleteCleanup: (id) => { cleanup.delete(id); return Promise.resolve(); },
     hasAccounts: () => Promise.resolve(accounts.size > 0),

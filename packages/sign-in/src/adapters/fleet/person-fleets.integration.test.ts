@@ -48,7 +48,7 @@ describe('the released core person lifecycle', () => {
 
       // When durable removal reconciles this person's fleet and installation cut-off twice.
       const cleanup = createCoreCleanup({ url, installationToken: token });
-      const target = { id: 'removal', ...input, personShipId: first.personShipId, shouldReleaseOwnedTrierarchs: true };
+      const target = { id: 'removal', attempts: 0, ...input, personShipId: first.personShipId, shouldReleaseOwnedTrierarchs: true };
       expect(await cleanup.acknowledge({ ...target, kind: 'cutOff', fleetId: null })).toBe(true);
       expect(await cleanup.acknowledge({ ...target, kind: 'fleet' })).toBe(true);
       expect(await cleanup.acknowledge({ ...target, kind: 'fleet' })).toBe(true);

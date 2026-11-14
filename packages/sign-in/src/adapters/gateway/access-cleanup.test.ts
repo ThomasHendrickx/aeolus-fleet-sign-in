@@ -20,7 +20,7 @@ describe('gateway cleanup notification', () => {
     });
     const url = await gateway.listen({ host: '127.0.0.1', port: 0 });
     const { input, secrets } = aSetup();
-    const target: CleanupTarget = { id: 'removal', kind: 'gateway', accountId: secrets.accountId(), fleetId: input.fleetId, personShipId: null, shouldReleaseOwnedTrierarchs: true };
+    const target: CleanupTarget = { id: 'removal', attempts: 0, kind: 'gateway', accountId: secrets.accountId(), fleetId: input.fleetId, personShipId: null, shouldReleaseOwnedTrierarchs: true };
     const cleanup = createAccessCleanup({ installationToken: 'test-installation', gateways: [{ id: input.fleetId, gatewayUrl: url }], core: { acknowledge: () => Promise.resolve(true) } });
     try {
       // When the same notification is retried, including after recreating the sender.

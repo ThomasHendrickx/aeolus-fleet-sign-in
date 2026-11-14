@@ -41,6 +41,7 @@ model IdentityRecord {
 }
 
 model CleanupTarget {
+  attempts Int @default(0)
   id String @id
   accountId String @map("account_id")
   fleetId String? @map("fleet_id")
@@ -48,5 +49,6 @@ model CleanupTarget {
   kind String
   shouldReleaseOwnedTrierarchs Boolean @map("should_release_owned_trierarchs")
   @@index([accountId, id])
+  @@index([attempts, id])
   @@map("cleanup_targets")
 }

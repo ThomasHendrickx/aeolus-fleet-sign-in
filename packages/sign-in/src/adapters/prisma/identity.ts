@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { Account, FleetRight, Identity, IdentityRecords } from '../../core/shared/identity.js';
 import { PrismaClient, type Prisma } from './generated/client.js';
 
-const cleanupSchema = z.object({ id: z.string(), accountId: accountIdSchema, fleetId: idSchema('fleet').nullable(), personShipId: idSchema('ship').nullable(), kind: z.enum(['cutOff', 'fleet', 'gateway']), shouldReleaseOwnedTrierarchs: z.boolean() });
+const cleanupSchema = z.object({ attempts: z.number().int().nonnegative(), id: z.string(), accountId: accountIdSchema, fleetId: idSchema('fleet').nullable(), personShipId: idSchema('ship').nullable(), kind: z.enum(['cutOff', 'fleet', 'gateway']), shouldReleaseOwnedTrierarchs: z.boolean() });
 const sharedSignInSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number(), revokedAt: z.number().optional() });
 const authorizationSchema = z.object({ clientId: z.string(), redirectUri: z.string(), state: z.string(), codeChallenge: z.string(), browser: z.string(), expiresAt: z.number() });
 const codeSchema = z.object({ clientId: z.string(), redirectUri: z.string(), codeChallenge: z.string(), signInHash: z.string(), expiresAt: z.number() });
@@ -38,7 +38,7 @@ function recordsOf(client: Prisma.TransactionClient): IdentityRecords {
   return {
     rights: async (accountId) => (await client.fleetRight.findMany({ where: { accountId } })).map((row) => { const right = rightOf(row); if (right === null) throw new Error('Expected right'); return right; }),
     revokeSharedSignIns: async (accountId) => { await client.$executeRaw`DELETE FROM identity_records WHERE key LIKE 'shared-sign-in/%' AND data->>'accountId' = ${accountId}`; },
-    pendingCleanup: async (accountId) => nullable(cleanupSchema, await client.cleanupTarget.findFirst({ where: accountId === undefined ? {} : { accountId }, orderBy: { id: 'asc' } })),
+    pendingCleanup: async (accountId) => nullable(cleanupSchema, await client.cleanupTarget.findFirst({ where: accountId === undefined ? {} : { accountId }, orderBy: [{ attempts: 'asc' }, { id: 'asc' }] })),
     saveCleanup: async (target) => { await client.cleanupTarget.upsert({ where: { id: target.id }, create: target, update: target }); },
     deleteCleanup: async (id) => { await client.cleanupTarget.deleteMany({ where: { id } }); },
     hasAccounts: async () => await client.account.findFirst({ select: { id: true } }) !== null,
