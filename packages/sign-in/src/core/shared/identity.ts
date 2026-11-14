@@ -25,6 +25,8 @@ export interface IdentityRecords {
   saveAccount(account: Account): Promise<void>;
   right(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight | null>;
   saveRight(right: FleetRight): Promise<void>;
+  /** A fleet-manager right on this fleet whose person ship is not yet mapped. */
+  pendingRight(fleetId: FleetId): Promise<FleetRight | null>;
   sharedSignIn(hash: string): Promise<SharedSignIn | null>;
   saveSharedSignIn(input: { hash: string; sharedSignIn: SharedSignIn }): Promise<void>;
   deleteSharedSignIn(hash: string): Promise<void>;
@@ -49,8 +51,8 @@ export interface Secrets {
 }
 
 export interface PersonFleets {
-  /** Reconciles every offered scope and the existing person installation commission key. */
-  reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight>;
+  /** Reconciles every offered scope and the existing person installation commission key; core may refuse the installation. */
+  reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<{ readonly kind: 'reconciled'; readonly right: FleetRight } | { readonly kind: 'installationRefused' }>;
 }
 
 export interface SharedSignIn {

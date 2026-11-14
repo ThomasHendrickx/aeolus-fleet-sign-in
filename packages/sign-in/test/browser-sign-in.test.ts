@@ -29,7 +29,7 @@ async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: st
   const app = createService({ identity, fleet, secrets, signer, now, config: {
     origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client, gatewayClient], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
-  if (shouldSetUp) expect((await app.setup(aSetup().input)).kind).toBe('ready');
+  if (shouldSetUp) expect((await app.setup.establish(aSetup().input)).kind).toBe('ready');
   return { app, secrets, signer, identity };
 }
 

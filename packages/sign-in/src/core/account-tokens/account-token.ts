@@ -22,7 +22,9 @@ export function createAccountToken(deps: { identity: Identity; fleet: PersonFlee
       const { account } = shared;
       const right = await deps.identity.transaction((records) => records.right({ accountId: account.id, fleetId: input.fleetId }));
       if (right === null || (right.scopes.length === 0 && !right.isFleetManager)) return { kind: 'noRights' as const };
-      const reconciled = right.isFleetManager ? await deps.fleet.reconcile({ accountId: account.id, fleetId: input.fleetId }) : right;
+      const fleetRight = right.isFleetManager ? await deps.fleet.reconcile({ accountId: account.id, fleetId: input.fleetId }) : { kind: 'reconciled' as const, right };
+      if (fleetRight.kind === 'installationRefused') return { kind: 'unavailable' as const };
+      const reconciled = fleetRight.right;
       await deps.identity.transaction((records) => records.saveRight(reconciled));
       const issuedAt = Math.floor(deps.now() / MILLISECONDS);
       const token = await deps.signer.sign({

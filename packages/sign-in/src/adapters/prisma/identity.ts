@@ -40,6 +40,7 @@ function recordsOf(client: Prisma.TransactionClient): IdentityRecords {
     accountById: async (id) => accountOf(await client.account.findUnique({ where: { id } })),
     saveAccount: async (account) => { await client.account.upsert({ where: { id: account.id }, create: account, update: account }); },
     right: async ({ accountId, fleetId }) => rightOf(await client.fleetRight.findUnique({ where: { fleetId_accountId: { fleetId, accountId } } })),
+    pendingRight: async (fleetId) => rightOf(await client.fleetRight.findFirst({ where: { fleetId, isFleetManager: true, personShipId: null } })),
     saveRight: async (right) => {
       const data = { ...right, scopes: [...right.scopes], groupValues: [...right.groupValues] };
       await client.fleetRight.upsert({ where: { fleetId_accountId: { fleetId: right.fleetId, accountId: right.accountId } }, create: data, update: data });

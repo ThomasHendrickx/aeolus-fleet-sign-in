@@ -32,7 +32,7 @@ describe('approved credential screens', () => {
       origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
     } });
     try {
-      await service.setup(aSetup().input);
+      await service.setup.establish(aSetup().input);
       await context.route(`${origin}/**`, async (route) => {
         const request = route.request();
         const url = new URL(request.url());
@@ -96,7 +96,7 @@ describe('approved credential screens', () => {
       origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
     } });
     try {
-      await service.setup(aSetup().input);
+      await service.setup.establish(aSetup().input);
       await context.route(`${origin}/**`, async (route) => {
         const request = route.request();
         const url = new URL(request.url());
@@ -142,7 +142,7 @@ describe('approved credential screens', () => {
       origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
     } });
     try {
-      await service.setup(aSetup().input);
+      await service.setup.establish(aSetup().input);
       await context.route(`${origin}/**`, async (route) => {
         const request = route.request();
         const url = new URL(request.url());

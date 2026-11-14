@@ -20,7 +20,7 @@ describe('durable identity across rollback concurrency and restart', () => {
   it('serializes simultaneous setup and persists the original person mapping through restart', async () => {
     // Given one database and simultaneous setup retries.
     const fleet = fleetOfMaya(database.identity);
-    const setup = createSetup({ identity: database.identity, fleet, secrets: aSetup().secrets });
+    const { establish: setup } = createSetup({ identity: database.identity, fleet, secrets: aSetup().secrets });
 
     // When both commands run and the process reopens its database.
     const results = await Promise.all([setup(aSetup().input), setup(aSetup().input)]);

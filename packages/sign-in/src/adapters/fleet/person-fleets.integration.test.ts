@@ -34,8 +34,8 @@ describe('the released core person lifecycle', () => {
 
       // When the same account is provisioned twice, including after recreating the adapter.
       const input = { accountId: aSetup().secrets.accountId(), fleetId: fleet.fleetId };
-      const first = await adapter.reconcile(input);
-      const retried = await createPersonFleets({ url, installationToken: token }).reconcile(input);
+      const first = rightOf(await adapter.reconcile(input));
+      const retried = rightOf(await createPersonFleets({ url, installationToken: token }).reconcile(input));
 
       // Then it is the same person, with fleet-manager rights, and bad installation credentials never admit access.
       expect(retried.personShipId).toBe(first.personShipId);
@@ -43,10 +43,15 @@ describe('the released core person lifecycle', () => {
       expect(first.scopes).toContain('fleet:person');
       expect(first.groupValues).toEqual(['fleet-manager']);
       expect(first.isFleetManager).toBe(true);
-      await expect(createPersonFleets({ url, installationToken: 'wrong' }).reconcile(input)).rejects.toThrow('Core refused the installation request');
+      expect(await createPersonFleets({ url, installationToken: 'wrong' }).reconcile(input)).toEqual({ kind: 'installationRefused' });
     } finally {
       await core?.close();
       await postgres.stop();
     }
   }, 120_000);
 });
+
+function rightOf(reconciled: Awaited<ReturnType<ReturnType<typeof createPersonFleets>['reconcile']>>) {
+  if (reconciled.kind !== 'reconciled') throw new Error('Core refused the installation');
+  return reconciled.right;
+}

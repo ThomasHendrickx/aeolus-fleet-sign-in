@@ -39,8 +39,9 @@ async function main() {
   if (args[0] === 'setup') {
     try {
       const fleetId = args.length === 1 && config.service.fleets.length === 1 ? config.service.fleets[0]?.id : args.length === 3 && args[1] === '--fleet' ? idSchema('fleet').parse(args[2]) : undefined;
-      if (fleetId === undefined || !config.service.fleets.some((registered) => registered.id === fleetId)) throw new Error('Choose a configured fleet');
-      process.exitCode = await runSetup({ fleetId, terminal: privateTerminal(), setup: service.setup });
+      const fleet = config.service.fleets.find((registered) => registered.id === fleetId);
+      if (fleet === undefined) throw new Error('Choose a configured fleet');
+      process.exitCode = await runSetup({ fleet, terminal: privateTerminal(), setup: service.setup });
     } finally { await service.server.close(); await database.close(); }
     return;
   }

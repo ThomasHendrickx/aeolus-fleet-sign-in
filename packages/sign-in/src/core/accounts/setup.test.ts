@@ -61,7 +61,7 @@ describe('first trusted setup', () => {
     // When the configuration is fixed and setup looks for pending work, then resumes it.
     fleet.shouldRefuseInstallation = false;
     const pending = await setup.pendingAccount(aSetup().input.fleetId);
-    const resumed = await setup.resume({ accountId: 'maya-opaque-account', fleetId: aSetup().input.fleetId });
+    const resumed = await setup.resume({ accountId: aSetup().secrets.accountId(), fleetId: aSetup().input.fleetId });
 
     // Then it is Maya's saved account, and resuming maps her one person ship.
     expect(pending).toMatchObject({ id: 'maya-opaque-account', displayName: 'Maya' });

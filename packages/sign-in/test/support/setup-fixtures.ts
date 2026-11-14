@@ -18,11 +18,12 @@ export function fleetOfMaya(identity: Identity) {
     async reconcile(input: { accountId: AccountId; fleetId: FleetId }) {
       const account = await identity.transaction((records) => records.accountById(input.accountId));
       if (account === null) throw new Error('Account must already be durable');
+      if (fleet.shouldRefuseInstallation) return { kind: 'installationRefused' as const };
       const key = `person-${input.accountId}`;
       const personShipId = people.get(key) ?? 'shp_00000000000000000000000001';
       people.set(key, personShipId);
       if (fleet.shouldLoseConfirmation) throw new Error('Confirmation lost');
-      return { ...input, personShipId, scopes: ['messages:send', 'messages:receive', 'fleet:read', 'fleet:commission'], groupValues: ['fleet-manager'], isFleetManager: true };
+      return { kind: 'reconciled' as const, right: { ...input, personShipId, scopes: ['messages:send', 'messages:receive', 'fleet:read', 'fleet:commission'], groupValues: ['fleet-manager'], isFleetManager: true } };
     },
   };
   return fleet;

@@ -1,4 +1,4 @@
-/** Trusted setup persists identity before any network provisioning, making restart safe. */
+/** Trusted setup persists identity before any network provisioning, making restart safe and resumable. */
 import type { AccountId, FleetId } from '@aeolus-fleet/common';
 
 import type { Identity, PersonFleets, Secrets } from '../shared/identity.js';
@@ -11,8 +11,19 @@ export interface SetupInput {
 }
 
 export function createSetup(deps: { identity: Identity; fleet: PersonFleets; secrets: Secrets }) {
-  return async (input: SetupInput) => {
-    try {
+  /** Provisioning failures leave the saved identity pending; a failure to save it is a system failure and propagates. */
+  async function provision(input: { accountId: AccountId; fleetId: FleetId }) {
+    let reconciled;
+    try { reconciled = await deps.fleet.reconcile(input); }
+    catch { return { kind: 'pending' as const, reason: 'unavailable' as const }; }
+    if (reconciled.kind === 'installationRefused') return { kind: 'pending' as const, reason: 'installationRefused' as const };
+    const { right } = reconciled;
+    await deps.identity.transaction((records) => records.saveRight(right));
+    return { kind: 'ready' as const, accountId: input.accountId, personShipId: right.personShipId };
+  }
+
+  return {
+    establish: async (input: SetupInput) => {
       const account = await deps.identity.transaction(async (records) => {
         const existing = await records.account(input.email);
         const created = existing ?? {
@@ -23,15 +34,15 @@ export function createSetup(deps: { identity: Identity; fleet: PersonFleets; sec
         if (await records.right({ accountId: created.id, fleetId: input.fleetId }) === null) await records.saveRight({ accountId: created.id, fleetId: input.fleetId, personShipId: null, scopes: [], groupValues: [], isFleetManager: true });
         return created;
       });
-      return await provision(account.id, input.fleetId);
-    } catch {
-      return { kind: 'unavailable' as const };
-    }
+      return provision({ accountId: account.id, fleetId: input.fleetId });
+    },
+    /** The saved fleet-manager account whose person ship is not yet mapped on this fleet, if any. */
+    pendingAccount: async (fleetId: FleetId) => {
+      return deps.identity.transaction(async (records) => {
+        const right = await records.pendingRight(fleetId);
+        return right === null ? null : records.accountById(right.accountId);
+      });
+    },
+    resume: provision,
   };
-
-  async function provision(accountId: AccountId, fleetId: FleetId) {
-    const right = await deps.fleet.reconcile({ accountId, fleetId });
-    await deps.identity.transaction((records) => records.saveRight(right));
-    return { kind: 'ready' as const, accountId, personShipId: right.personShipId };
-  }
 }

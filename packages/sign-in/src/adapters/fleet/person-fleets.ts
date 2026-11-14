@@ -17,6 +17,11 @@ const DEVELOPMENT_VERSION = '0.0.0';
 const PERSON_NAME_ACCOUNT_CHARACTERS = 12;
 const TIMEOUT_MS = 10_000;
 const MANAGER_GROUP = 'fleet-manager';
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
+
+/** Core refused the installation token: a configuration problem, reported as such rather than as an outage. */
+class InstallationRefused extends Error {}
 
 export function createPersonFleets(options: { url: string; installationToken: string }) {
   const url = options.url.replace(/\/$/, '');
@@ -28,6 +33,7 @@ export function createPersonFleets(options: { url: string; installationToken: st
       ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
       signal: AbortSignal.timeout(TIMEOUT_MS), redirect: 'error',
     });
+    if (response.status === HTTP_UNAUTHORIZED || response.status === HTTP_FORBIDDEN) throw new InstallationRefused();
     if (!response.ok) throw new Error('Core refused the installation request');
     const result: unknown = await response.json();
     return input.path.startsWith('/trpc/') ? z.object({ result: z.object({ data: z.unknown() }) }).parse(result).result.data : result;
@@ -65,7 +71,16 @@ export function createPersonFleets(options: { url: string; installationToken: st
       const [major = 0, minor = 0] = version.split('.').map(Number);
       if (version !== DEVELOPMENT_VERSION && (major < MINIMUM_MAJOR || (major === MINIMUM_MAJOR && minor < MINIMUM_MINOR))) throw new CoreCompatibilityError({ minimum: MINIMUM_CORE_VERSION, reported: version });
     },
-    async reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight> {
+    async reconcile(input: { accountId: AccountId; fleetId: FleetId }) {
+      try { return { kind: 'reconciled' as const, right: await reconcileRight(input) }; }
+      catch (error) {
+        if (error instanceof InstallationRefused) return { kind: 'installationRefused' as const };
+        throw error;
+      }
+    },
+  };
+
+  async function reconcileRight(input: { accountId: AccountId; fleetId: FleetId }): Promise<FleetRight> {
       const found = await call({ path: `/trpc/installation.fleets.get?input=${encodeURIComponent(JSON.stringify({ fleetId: input.fleetId }))}` });
       installationFleetSchema.parse(found);
       const namespaces = scopesOutputSchema.parse(await call({ path: '/trpc/fleet.scopes', fleetId: input.fleetId }));
@@ -76,6 +91,5 @@ export function createPersonFleets(options: { url: string; installationToken: st
       } }));
       await call({ path: '/trpc/fleet.assignLabel', fleetId: input.fleetId, body: { shipId: person.shipId, valueId: groupValueId } });
       return { ...input, personShipId: person.shipId, scopes: namespaces.flatMap((namespace) => namespace.scopes.map((scope) => scope.scope)), groupValues: [MANAGER_GROUP], isFleetManager: true };
-    },
-  };
+  }
 }

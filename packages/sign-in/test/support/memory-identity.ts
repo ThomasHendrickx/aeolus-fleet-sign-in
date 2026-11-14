@@ -28,6 +28,7 @@ export function memoryIdentity() {
     accountById: (id: AccountId) => Promise.resolve([...accounts.values()].find((account) => account.id === id) ?? null),
     saveAccount: (account) => { accounts.set(account.email, account); return Promise.resolve(); },
     right: ({ accountId, fleetId }) => Promise.resolve(rights.get(`${fleetId}/${accountId}`) ?? null),
+    pendingRight: (fleetId) => Promise.resolve([...rights.values()].find((right) => right.fleetId === fleetId && right.isFleetManager && right.personShipId === null) ?? null),
     saveRight: (right) => { rights.set(`${right.fleetId}/${right.accountId}`, right); return Promise.resolve(); },
   };
   return {

@@ -79,10 +79,10 @@ describe('the first person owns and answers the same agent', () => {
         origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri: 'https://console.example.test/sign-in/done' }], fleets: [{ id: fleet.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
       } });
       const setupInput = { fleetId: fleet.fleetId, email: 'maya@example.test', displayName: 'Maya', password: 'journey-password-fixture' };
-      const first = await service.setup(setupInput);
+      const first = await service.setup.establish(setupInput);
       expect(first.kind).toBe('ready');
       if (first.kind !== 'ready' || first.personShipId === null) throw new Error('Setup did not resolve Maya');
-      expect(await service.setup(setupInput)).toEqual(first);
+      expect(await service.setup.establish(setupInput)).toEqual(first);
       const shared = await service.signIn.authenticate({ email: setupInput.email, password: setupInput.password, address: 'local-test' });
       if (shared.kind !== 'authenticated') throw new Error('Expected Maya authentication');
       const exchanged = await fetch(`${origin}/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange', subject_token_type: 'urn:aeolus:params:oauth:token-type:sign-in', subject_token: shared.signIn, resource: fleet.fleetId, client_id: 'console', client_secret: 'client-fixture' }) });

@@ -7,7 +7,7 @@ import { aSetup, fleetOfMaya } from './setup-fixtures.js';
 export async function signInOfMaya() {
   const identity = memoryIdentity();
   const fleet = fleetOfMaya(identity);
-  await createSetup({ identity, fleet, secrets: aSetup().secrets })(aSetup().input);
+  await createSetup({ identity, fleet, secrets: aSetup().secrets }).establish(aSetup().input);
   let sequence = 0;
   const fixture = { now: 0 };
   const signIn = createSignIn({ identity, now: () => fixture.now, secrets: {
