@@ -104,6 +104,24 @@ const impurities = [
     says: 'never reaches the network or the file system',
   },
   {
+    label: 'node:dns/promises',
+    code: "import { resolve } from 'node:dns/promises';\nexport const lookup = resolve;",
+    rule: 'no-restricted-imports',
+    says: 'never reaches the network or the file system',
+  },
+  {
+    label: 'dns/promises',
+    code: "import { resolve } from 'dns/promises';\nexport const lookup = resolve;",
+    rule: 'no-restricted-imports',
+    says: 'never reaches the network or the file system',
+  },
+  {
+    label: 'node:dns/promises through import()',
+    code: "export const load = () => import('node:dns/promises');",
+    rule: 'no-restricted-syntax',
+    says: 'never reaches the network or the file system',
+  },
+  {
     label: 'a throw',
     code: "export function refuse(): never {\n  throw new Error('refused');\n}\n",
     rule: 'no-restricted-syntax',
