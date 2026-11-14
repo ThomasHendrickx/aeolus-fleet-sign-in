@@ -5,6 +5,7 @@ import type { AccessCleanup, CleanupTarget, Identity, Secrets } from '../shared/
 
 export function createAccess(deps: { identity: Identity; secrets: Secrets; cleanup: AccessCleanup }) {
   return {
+    hasPending: () => deps.identity.transaction(async (records) => await records.pendingCleanup() !== null),
     remove: (input: { accountId: AccountId; fleetId: FleetId | null }) => deps.identity.transaction(async (records) => {
       const account = await records.accountById(input.accountId);
       if (account === null) return { kind: 'notFound' as const };

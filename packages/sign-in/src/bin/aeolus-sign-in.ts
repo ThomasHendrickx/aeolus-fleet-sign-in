@@ -9,6 +9,10 @@ import { z } from 'zod';
 import { createService } from '../app.js';
 import { readConfig } from '../config.js';
 import { privateTerminal } from '../adapters/cli/private-terminal.js';
+import { createAccess } from '../core/reconciliation/access.js';
+import { createCoreCleanup } from '../adapters/fleet/core-cleanup.js';
+import { createAccessCleanup } from '../adapters/gateway/access-cleanup.js';
+import { runAccessCommand } from '../adapters/cli/access-command.js';
 import { runSetup } from '../adapters/cli/setup-command.js';
 import { createSecrets } from '../adapters/crypto/secrets.js';
 import { createSigner } from '../adapters/crypto/signer.js';
@@ -24,17 +28,24 @@ async function main() {
     process.stdout.write('Signing key saved privately. Configure its file and key id on the server.\n');
     return;
   }
-  if (!['serve', 'setup', 'migrate'].includes(args[0] ?? '')) throw new Error('Unknown command');
+  if (!['serve', 'setup', 'migrate', 'disable', 'remove-rights', 'recover', 'reconcile'].includes(args[0] ?? '')) throw new Error('Unknown command');
   const config = readConfig(process.env);
   const fleet = createPersonFleets({ url: config.coreUrl, installationToken: config.installationToken });
+  const database = await openIdentity(config.databaseUrl);
+  const access = createAccess({ identity: database.identity, secrets: createSecrets(), cleanup: createAccessCleanup({ installationToken: config.installationToken, gateways: config.service.fleets, core: createCoreCleanup({ url: config.coreUrl, installationToken: config.installationToken }) }) });
+  if (args[0] === 'migrate') { await database.close(); process.stdout.write('Sign-in database migrated.\n'); return; }
+  if (['disable', 'remove-rights', 'recover', 'reconcile'].includes(args[0] ?? '')) {
+    try { process.exitCode = await runAccessCommand({ args, fleets: config.service.fleets, terminal: privateTerminal(), access }); }
+    finally { await database.close(); }
+    return;
+  }
+  try {
   await fleet.checkCompatibility();
   const keys = await Promise.all(config.signingKeys.map(async (key) => {
     if (((await stat(key.file)).mode & 0o077) !== 0) throw new Error('Signing keys must be private');
     return { id: key.id, privateKey: createPrivateKey(await readFile(key.file, 'utf8')) };
   }));
   const signer = createSigner({ keys, activeKeyId: config.activeKeyId });
-  const database = await openIdentity(config.databaseUrl);
-  if (args[0] === 'migrate') { await database.close(); process.stdout.write('Sign-in database migrated.\n'); return; }
   const service = createService({ identity: database.identity, fleet, signer, secrets: createSecrets(), now: () => Date.now(), config: config.service });
   if (args[0] === 'setup') {
     try {
@@ -47,9 +58,19 @@ async function main() {
   }
   await service.server.listen({ host: '0.0.0.0', port: config.port });
   process.stdout.write('Aeolus sign-in is listening behind its configured HTTPS origin.\n');
-  const close = async () => { await service.server.close(); await database.close(); };
+  let isClosing = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let work = Promise.resolve();
+  const retry = () => {
+    work = access.reconcile().then(() => undefined).catch(() => {
+      process.stderr.write('Cleanup is still pending. Check the server configuration and retry reconciliation.\n');
+    }).finally(() => { if (!isClosing) timer = setTimeout(retry, 1000); });
+  };
+  retry();
+  const close = async () => { isClosing = true; clearTimeout(timer); await work; await service.server.close(); await database.close(); };
   process.once('SIGTERM', () => { void close(); });
   process.once('SIGINT', () => { void close(); });
+  } catch (error) { await database.close(); throw error; }
 }
 
 try { await main(); }
