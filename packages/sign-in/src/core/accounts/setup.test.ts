@@ -69,4 +69,17 @@ describe('first trusted setup', () => {
     expect(await setup.pendingAccount(aSetup().input.fleetId)).toBeNull();
     expect(fleet.people.size).toBe(1);
   });
+
+  it('stores the email in one case and finds it again whatever case setup is given', async () => {
+    // Given trusted setup.
+    const identity = memoryIdentity();
+    const setup = createSetup({ identity, fleet: fleetOfMaya(identity), secrets: aSetup().secrets });
+
+    // When Maya is set up as Maya@Example.TEST, then again as maya@example.test.
+    await setup.establish({ ...aSetup().input, email: 'Maya@Example.TEST' });
+    await setup.establish(aSetup().input);
+
+    // Then one account holds the email in lower case.
+    expect([...identity.accounts.values()].map((account) => account.email)).toEqual(['maya@example.test']);
+  });
 });

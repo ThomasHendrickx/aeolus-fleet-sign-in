@@ -134,4 +134,18 @@ describe('Maya signs in to her local account', () => {
     expect(otherBrowser).toEqual({ kind: 'startAgain', clientId: 'console' });
     expect(completed).toMatchObject({ kind: 'authorized', redirectUri: request.redirectUri, state: request.state, expiresAt: 43_200_000 });
   });
+
+  it('matches the email whatever its case, and counts failures once per account', async () => {
+    // Given Maya's account saved as maya@example.test and four failures typed in another case.
+    const fixture = await signInOfMaya();
+    for (let count = 0; count < 4; count += 1) await fixture.signIn.authenticate({ email: 'MAYA@example.test', password: 'wrong', address: `address-${count}` });
+
+    // When she signs in as Maya@Example.TEST, before and after a fifth failure in yet another case.
+    const accepted = await fixture.signIn.authenticate({ email: 'Maya@Example.TEST', password: 'private-password', address: 'new-address' });
+    const refused = await fixture.signIn.authenticate({ email: 'maya@EXAMPLE.test', password: 'wrong', address: 'other-address' });
+
+    // Then the case does not matter, for her credential or for the account limit.
+    expect(accepted.kind).toBe('authenticated');
+    expect(refused.kind).toBe('tooManyAttempts');
+  });
 });
