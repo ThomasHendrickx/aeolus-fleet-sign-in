@@ -56,6 +56,7 @@ export async function runSetup(input: { fleet: { id: FleetId; name: string }; te
 
 /** Scene 25: the identity is saved and provisioning waits for the next run. */
 function refused(input: { terminal: PrivateTerminal; fleet: { name: string }; provisioned: Extract<Provisioned, { kind: 'pending' }> }): number {
+  if (input.provisioned.reason === 'accessRemoved') { input.terminal.write('Access was removed. Use account recovery to restore the requested access.'); return 1; }
   input.terminal.write(`Setup could not provision ${input.fleet.name}.`);
   if (input.provisioned.reason === 'installationRefused') input.terminal.write('Core refused installation authentication.');
   input.terminal.write('Account identity is saved; provisioning is pending.');

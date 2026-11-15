@@ -6,9 +6,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { z } from 'zod';
 
-import type { Account, FleetRight, Identity, IdentityRecords } from '../../core/shared/identity.js';
+import { cleanupTargetIdSchema, type Account, type FleetRight, type Identity, type IdentityRecords } from '../../core/shared/identity.js';
 import { PrismaClient, type Prisma } from './generated/client.js';
 
+const cleanupSchema = z.object({ cursor: z.string().nullable(), attempts: z.number().int().nonnegative(), id: cleanupTargetIdSchema, accountId: accountIdSchema, fleetId: idSchema('fleet').nullable(), personShipId: idSchema('ship').nullable(), kind: z.enum(['cutOff', 'fleet', 'gateway']), shouldReleaseOwnedTrierarchs: z.boolean() });
 const sharedSignInSchema = z.object({ accountId: accountIdSchema, expiresAt: z.number(), revokedAt: z.number().optional() });
 const authorizationSchema = z.object({ clientId: z.string(), redirectUri: z.string(), state: z.string(), codeChallenge: z.string(), browser: z.string(), expiresAt: z.number() });
 const codeSchema = z.object({ clientId: z.string(), redirectUri: z.string(), codeChallenge: z.string(), signInHash: z.string(), expiresAt: z.number() });
@@ -35,6 +36,11 @@ function recordsOf(client: Prisma.TransactionClient): IdentityRecords {
   const save = async (key: string, data: Prisma.InputJsonObject) => { await client.identityRecord.upsert({ where: { key }, create: { key, data }, update: { data } }); };
   const remove = async (key: string) => { await client.identityRecord.deleteMany({ where: { key } }); };
   return {
+    rights: async (accountId) => (await client.fleetRight.findMany({ where: { accountId } })).map((row) => { const right = rightOf(row); if (right === null) throw new Error('Expected right'); return right; }),
+    revokeSharedSignIns: async (accountId) => { await client.$executeRaw`DELETE FROM identity_records WHERE key LIKE 'shared-sign-in/%' AND data->>'accountId' = ${accountId}`; },
+    pendingCleanup: async (accountId) => nullable(cleanupSchema, await client.cleanupTarget.findFirst({ where: accountId === undefined ? {} : { accountId }, orderBy: [{ attempts: 'asc' }, { id: 'asc' }] })),
+    saveCleanup: async (target) => { await client.cleanupTarget.upsert({ where: { id: target.id }, create: target, update: target }); },
+    deleteCleanup: async (id) => { await client.cleanupTarget.deleteMany({ where: { id } }); },
     hasAccounts: async () => await client.account.findFirst({ select: { id: true } }) !== null,
     account: async (email) => accountOf(await client.account.findUnique({ where: { email } })),
     accountById: async (id) => accountOf(await client.account.findUnique({ where: { id } })),
@@ -86,6 +92,11 @@ async function migrate(databaseUrl: string) {
     if (applied.rowCount === 0) {
       await client.query(await readFile(new URL('./migrations/001-identity.sql', import.meta.url), 'utf8'));
       await client.query('INSERT INTO sign_in_migrations(version) VALUES (1)');
+    }
+    const cleanupApplied = await client.query('SELECT version FROM sign_in_migrations WHERE version = 2');
+    if (cleanupApplied.rowCount === 0) {
+      await client.query(await readFile(new URL('./migrations/002-access.sql', import.meta.url), 'utf8'));
+      await client.query('INSERT INTO sign_in_migrations(version) VALUES (2)');
     }
     await client.query('COMMIT');
   } catch (error) {

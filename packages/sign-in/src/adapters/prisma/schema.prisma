@@ -11,6 +11,8 @@ datasource db {
 
 model Account {
   id String @id
+  isDisabled Boolean @default(false) @map("is_disabled")
+  accessVersion Int @default(0) @map("access_version")
   email String @unique
   displayName String @map("display_name")
   passwordHash String @map("password_hash")
@@ -36,4 +38,18 @@ model IdentityRecord {
   key String @id
   data Json
   @@map("identity_records")
+}
+
+model CleanupTarget {
+  attempts Int @default(0)
+  cursor String?
+  id String @id
+  accountId String @map("account_id")
+  fleetId String? @map("fleet_id")
+  personShipId String? @map("person_ship_id")
+  kind String
+  shouldReleaseOwnedTrierarchs Boolean @map("should_release_owned_trierarchs")
+  @@index([accountId, id])
+  @@index([attempts, id])
+  @@map("cleanup_targets")
 }
