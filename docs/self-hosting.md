@@ -95,7 +95,7 @@ For example, after a protected env file and key mount exist, run setup using a p
 docker run --rm -it --pids-limit=128 --user "$(id -u):$(id -g)" --env-file /protected/sign-in.env --mount type=bind,src=/protected,dst=/protected,readonly aeolus-sign-in:local setup
 ```
 
-Serve with the same protected env and read-only key mount, exposing port 3000 only to the HTTPS proxy. The image contains compiled entrypoints, migrations, UI assets and runtime dependencies. No service credentials or signing keys are built into it. Image publication is separate from opening this PR.
+With rootless podman, add `--userns=keep-id` beside `--user`, and write JSON values in the env file without surrounding quotes, since `--env-file` keeps them. Serve with the same protected env and read-only key mount, exposing port 3000 only to the HTTPS proxy. The image contains compiled entrypoints, migrations, UI assets and runtime dependencies. No service credentials or signing keys are built into it. Image publication is separate from opening this PR.
 
 ## Backup, restore and signing rotation
 
