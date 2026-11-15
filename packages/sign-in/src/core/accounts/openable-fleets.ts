@@ -1,4 +1,7 @@
-/** The fleets a shared sign-in may open: only those where its account holds fleet rights. */
+/**
+ * The fleets a shared sign-in may open: only those where its account holds fleet rights.
+ * A fleet manager counts before its scopes are reconciled, as the token exchange that reconciles them does.
+ */
 import type { FleetId } from '@aeolus-fleet/common';
 
 import type { createSignIn } from '../sign-in/sign-in.js';
@@ -10,7 +13,7 @@ export function createOpenableFleets(deps: { identity: Identity; signIn: Pick<Re
     if (shared.kind === 'signedOut') return shared;
     const { account } = shared;
     const rights = await deps.identity.transaction((records) => Promise.all(input.fleetIds.map((fleetId) => records.right({ accountId: account.id, fleetId }))));
-    const fleetIds = rights.flatMap((right) => right !== null && right.scopes.length > 0 ? [right.fleetId] : []);
+    const fleetIds = rights.flatMap((right) => right !== null && (right.scopes.length > 0 || right.isFleetManager) ? [right.fleetId] : []);
     return { kind: 'fleets' as const, account, fleetIds };
   };
 }
