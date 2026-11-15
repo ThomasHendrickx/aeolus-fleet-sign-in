@@ -24,7 +24,7 @@ SIGN_IN_ORIGIN=https://signin.example.test
 SIGN_IN_COOKIE_DOMAIN=example.test
 SIGN_IN_ACTIVE_KEY_ID=first
 SIGN_IN_SIGNING_KEYS=[{"id":"first","file":"/protected/sign-in-key.pem"}]
-SIGN_IN_CLIENTS=[{"id":"console","secret":"<console-client-secret>","redirectUri":"https://console.example.test/sign-in/done"},{"id":"gateway","secret":"<gateway-client-secret>","redirectUri":"https://bridge.example.test/sign-in/done"}]
+SIGN_IN_CLIENTS=[{"id":"console","secret":"<console-client-secret>","redirectUri":"https://console.example.test/sign-in/done"},{"id":"gateway","secret":"<gateway-client-secret>","redirectUri":"https://bridge.example.test/sign-in/done"},{"id":"gateway-chats","secret":"<gateway-chats-client-secret>","redirectUri":"https://bridge.example.test/pagasae/callback"}]
 SIGN_IN_FLEETS=[{"id":"<existing-fleet-id>","name":"workshop","consoleUrl":"https://console.example.test","gatewayUrl":"https://bridge.example.test"}]
 PORT=3000
 ```
@@ -41,7 +41,18 @@ AEOLUS_PAGASAE_CLIENT_ID=console
 AEOLUS_PAGASAE_CLIENT_SECRET=<console-client-secret>
 ```
 
-These are existing public setting names. Set the gateway's existing sign-in issuer URL and app-client settings to this origin and its `gateway` registration; use the names documented by the installed gateway version. Preserve its exact `/sign-in/done` callback. The service implements the existing endpoints, not a generic identity-provider substitute:
+These are the console's existing setting names. Set the gateway's, with the same origin, to its two registrations. The gateway refuses to start when `PAGASAE_URL` has no chats client, so the third registration above is required, though no chat connects yet:
+
+```text
+PAGASAE_URL=https://signin.example.test
+PAGASAE_CLIENT_ID=gateway-chats
+PAGASAE_CLIENT_SECRET=<gateway-chats-client-secret>
+PAGASAE_APP_CLIENT_ID=gateway
+PAGASAE_APP_CLIENT_SECRET=<gateway-client-secret>
+INSTALLATION_TOKEN=<same-server-only-installation-token-as-core>
+```
+
+The gateway needs the installation token so it accepts the removal notification below, and so it serves a fleet only once switched on: send `installation.setEnabled` to its `/trpc` with the token in the `x-aeolus-installation-token` header, `{"requestId":"<new key>","fleetId":"<existing-fleet-id>","enabled":true}`, and then connect it from the console's Settings. Run the gateway from its build (`npm start`). Preserve its exact `/sign-in/done` callback. When you load these values into a shell with `set -a`, single-quote each JSON value; unquoted, the shell strips its double quotes and the service stops with a generic message. The service implements the existing endpoints, not a generic identity-provider substitute:
 
 | Endpoint | Boundary |
 | --- | --- |
