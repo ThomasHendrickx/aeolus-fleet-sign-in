@@ -50,7 +50,10 @@ PAGASAE_CLIENT_SECRET=<gateway-chats-client-secret>
 PAGASAE_APP_CLIENT_ID=gateway
 PAGASAE_APP_CLIENT_SECRET=<gateway-client-secret>
 INSTALLATION_TOKEN=<same-server-only-installation-token-as-core>
+GATEWAY_PUBLIC_URL=https://bridge.example.test
 ```
+
+`GATEWAY_PUBLIC_URL` is the gateway's public origin. It must match the host registered in `SIGN_IN_CLIENTS` and `SIGN_IN_FLEETS`. The gateway defaults it to `http://127.0.0.1:<PORT>` and derives both callback URIs (`/sign-in/done` and `/pagasae/callback`) from it, so Bridge sign-in fails against the registrations above while it is unset.
 
 The gateway needs the installation token so it accepts the removal notification below, and so it serves a fleet only once switched on: send `installation.setEnabled` to its `/trpc` with the token in the `x-aeolus-installation-token` header, `{"requestId":"<new key>","fleetId":"<existing-fleet-id>","enabled":true}`, and then connect it from the console's Settings. Run the gateway from its build (`npm start`). Preserve its exact `/sign-in/done` callback. When you load these values into a shell with `set -a`, single-quote each JSON value; unquoted, the shell strips its double quotes and the service stops with a generic message. The service implements the existing endpoints, not a generic identity-provider substitute:
 
