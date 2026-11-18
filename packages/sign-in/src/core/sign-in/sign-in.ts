@@ -50,6 +50,15 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       const email = normalisedEmail(input.email);
       const accountKey = `account:${await digest(email)}`;
       const addressKey = `address:${await digest(input.address)}`;
+      const prepared = await transaction(async (records) => {
+        const accountFailures = await records.attempts(accountKey);
+        const addressFailures = await records.attempts(addressKey);
+        const retryAt = Math.max(accountFailures?.refusedUntil ?? 0, addressFailures?.refusedUntil ?? 0);
+        if (retryAt > deps.now()) return { kind: 'tooManyAttempts' as const, retryAt };
+        return { kind: 'ready' as const, account: await records.account(email) };
+      });
+      if (prepared.kind !== 'ready') return prepared;
+      const isAccepted = await deps.secrets.verifyPassword({ password: input.password, hash: prepared.account?.passwordHash ?? null });
       return transaction(async (records) => {
         const now = deps.now();
         const accountFailures = await records.attempts(accountKey);
@@ -57,8 +66,9 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
         const retryAt = Math.max(accountFailures?.refusedUntil ?? 0, addressFailures?.refusedUntil ?? 0);
         if (retryAt > now) return { kind: 'tooManyAttempts' as const, retryAt };
         const account = await records.account(email);
-        const isAccepted = await deps.secrets.verifyPassword({ password: input.password, hash: account?.passwordHash ?? null });
-        if (!isAccepted || account === null || account.isDisabled) {
+        // Recovery or access removal may have committed while the password was being checked.
+        const isCurrent = account !== null && prepared.account !== null && account.id === prepared.account.id && account.passwordHash === prepared.account.passwordHash && account.accessVersion === prepared.account.accessVersion;
+        if (!isAccepted || !isCurrent || account.isDisabled) {
           const failedAccount = failed(accountFailures, { now, maximum: ACCOUNT_FAILURES });
           const failedAddress = failed(addressFailures, { now, maximum: ADDRESS_FAILURES });
           await records.saveAttempts({ key: accountKey, attempts: failedAccount });
