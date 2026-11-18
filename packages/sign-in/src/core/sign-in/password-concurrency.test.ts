@@ -1,4 +1,5 @@
 /** Issue #3: password work leaves identity transitions available without weakening credential or lockout checks. */
+import { memoryFlowSeals } from '../../../test/support/memory-flow-seals.js';
 import { describe, expect, it } from 'vitest';
 
 import { signInOfMaya } from '../../../test/support/sign-in-fixtures.js';
@@ -11,7 +12,7 @@ async function pausedPassword() {
   const original = fixture.signIn;
   const entered = Promise.withResolvers<undefined>();
   const released = Promise.withResolvers<boolean>();
-  const signIn = createSignIn({ identity: fixture.identity, now: () => fixture.now, secrets: {
+  const signIn = createSignIn({ flows: memoryFlowSeals(), identity: fixture.identity, now: () => fixture.now, secrets: {
     token: () => 'slow-sign-in',
     digest: (value) => Promise.resolve(`digest:${value}`),
     verifyPassword: () => { entered.resolve(undefined); return released.promise; },

@@ -3,6 +3,8 @@ import { createPublicKey, type KeyObject } from 'node:crypto';
 
 import { SignJWT, type JWK } from 'jose';
 
+import { createAuthorizationSeals } from './authorization-seals.js';
+
 import type { FleetClaims } from '../../core/account-tokens/account-token.js';
 
 export function createSigner(input: { activeKeyId: string; keys: readonly { id: string; privateKey: KeyObject }[] }) {
@@ -11,6 +13,7 @@ export function createSigner(input: { activeKeyId: string; keys: readonly { id: 
   const keys: JWK[] = input.keys.map((key) => ({ ...createPublicKey(key.privateKey).export({ format: 'jwk' }), kid: key.id, alg: 'EdDSA', use: 'sig' }));
   return {
     publicKeys: { keys },
+    flows: createAuthorizationSeals({ active, keys }),
     sign: (claims: FleetClaims) => new SignJWT(claims).setProtectedHeader({ alg: 'EdDSA', typ: 'at+jwt', kid: active.id }).sign(active.privateKey),
   };
 }

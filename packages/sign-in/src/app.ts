@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { createOpenableFleets } from './core/accounts/openable-fleets.js';
 import { createSetup } from './core/accounts/setup.js';
 import { createAccountToken } from './core/account-tokens/account-token.js';
+import { createPurge } from './core/sign-in/purge.js';
 import { createSignIn } from './core/sign-in/sign-in.js';
 import { createSignOut, type AccountSessions } from './core/sign-in/sign-out.js';
 import type { Identity, PersonFleets } from './core/shared/identity.js';
@@ -22,11 +23,12 @@ const browserCookie = 'aeolus_sign_in_browser';
 /** The browser-binding cookie lives as long as a sign-in flow: 10 minutes. */
 const BROWSER_BINDING_SECONDS = 600;
 const MILLISECONDS_PER_SECOND = 1000;
+const PURGE_INTERVAL_MS = 60 * 60 * 1000;
 const BODY_LIMIT_BYTES = 16_384;
 const REQUEST_TIMEOUT_MS = 15_000;
 const authorizeSchema = z.object({ response_type: z.literal('code'), client_id: z.string(), redirect_uri: z.url(), state: z.string().min(1).max(1024), code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code_challenge_method: z.literal('S256') });
-const credentialSchema = z.object({ flow: z.string().min(1).max(256), email: z.email().max(320), password: z.string().min(1).max(1024) });
-const submittedSchema = z.object({ flow: z.string().min(1).max(256), email: z.string().max(320).optional() });
+const credentialSchema = z.object({ flow: z.string().min(1).max(8192), email: z.email().max(320), password: z.string().min(1).max(1024) });
+const submittedSchema = z.object({ flow: z.string().min(1).max(8192), email: z.string().max(320).optional() });
 const startAgainSchema = z.object({ client: z.string().min(1).max(256).optional() });
 const revokeRequestSchema = z.object({ token: z.string().min(1).max(4096) });
 const script = await readFile(new URL('./adapters/http/assets/sign-in.js', import.meta.url), 'utf8');
@@ -34,7 +36,21 @@ const script = await readFile(new URL('./adapters/http/assets/sign-in.js', impor
 export function createService(deps: { identity: Identity; fleet: PersonFleets & AccountSessions; secrets: ReturnType<typeof createSecrets>; signer: ReturnType<typeof createSigner>; config: ServiceConfig; now: () => number; log?: (error: unknown) => void }) {
   const config = serviceConfigSchema.parse(deps.config);
   const server = Fastify({ logger: false, trustProxy: config.trustedProxy ?? false, bodyLimit: BODY_LIMIT_BYTES, requestTimeout: REQUEST_TIMEOUT_MS });
-  const signIn = createSignIn(deps);
+  const signIn = createSignIn({ ...deps, flows: deps.signer.flows });
+  const purge = createPurge(deps);
+  let purgeTimer: ReturnType<typeof setTimeout> | undefined;
+  let purgeWork = Promise.resolve();
+  let isClosing = false;
+  const schedulePurge = () => {
+    purgeTimer = setTimeout(() => {
+      purgeWork = purge().catch(() => {
+        process.stderr.write('Expired sign-in records could not be purged. Retrying in one hour.\n');
+      }).finally(() => { if (!isClosing) schedulePurge(); });
+    }, PURGE_INTERVAL_MS);
+    purgeTimer.unref();
+  };
+  server.addHook('onReady', async () => { await purge(); schedulePurge(); });
+  server.addHook('onClose', async () => { isClosing = true; clearTimeout(purgeTimer); await purgeWork; });
   const signOut = createSignOut({ signIn, sessions: deps.fleet, log: deps.log ?? ((error) => { process.stderr.write(`Sign-in failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); }) });
   const token = createAccountToken({ ...deps, issuer: config.origin, signIn });
   const setup = createSetup(deps);
@@ -137,7 +153,7 @@ export function createService(deps: { identity: Identity; fleet: PersonFleets & 
     if (result.kind === 'failed') return reply.code(500).send({ error: 'server_error' });
     return result.kind === 'unavailable' ? reply.code(503).send({ error: 'temporarily_unavailable' }) : {};
   });
-  return { server, setup, signIn };
+  return { server, setup, signIn, purge };
 }
 
 function wantsJson(request: FastifyRequest): boolean {

@@ -21,7 +21,7 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(async () => { await pool.end(); await database.close(); await container.stop(); }, 60_000);
 
-it('deletes expired sign-in records at startup and hourly while preserving live records', async () => {
+it('deletes expired sign-in records at startup and on repeated purges while preserving live records', async () => {
   // Given expired and live flows, codes, shared sign-ins and failed attempts.
   const { app, clock } = service();
   const accountId = aSetup().secrets.accountId();
@@ -36,7 +36,7 @@ it('deletes expired sign-in records at startup and hourly while preserving live 
     await records.saveAttempts({ key: 'live', attempts: { failures: [900_000], refusedUntil: 1_800_000 } });
   });
   try {
-    // When the service starts and later its hourly purge runs.
+    // When the service starts and later purge retries run.
     clock.now = 900_000;
     await app.server.ready();
     expect(await keys()).toEqual(['attempts/live', 'authorization/live', 'code/live', 'shared-sign-in/live', 'shared-sign-in/retry']);
@@ -51,7 +51,7 @@ it('deletes expired sign-in records at startup and hourly while preserving live 
 
 it('stores no row for an anonymous visit and completes only a submitted browser-bound flow once', async () => {
   // Given an installation with Maya and no sign-in records.
-  const { app, clock } = service();
+  let { app, clock } = service();
   clock.now = 8_000_000;
   await app.setup.establish(aSetup().input);
   try {
@@ -68,11 +68,27 @@ it('stores no row for an anonymous visit and completes only a submitted browser-
     expect(await keys()).toEqual(before);
     const flow = /name="flow" value="([^"]+)"/.exec(visit.body)?.[1] ?? '';
     const cookie = visit.cookies.find((held) => held.name === 'aeolus_sign_in_browser');
+    // The configured signing key and browser binding survive a process/database restart.
+    await app.server.close();
+    await database.close();
+    database = await openIdentity(container.getConnectionUri());
+    ({ app, clock } = service());
+    clock.now = 8_000_000;
+    await app.server.ready();
+    const tampered = await app.server.inject({ method: 'POST', url: '/sign-in', payload: { flow: `x${flow.slice(1)}`, email: 'maya@example.test', password: aSetup().input.password }, headers: { origin, cookie: `aeolus_sign_in_browser=${cookie?.value ?? ''}` } });
+    expect(tampered.statusCode).toBe(400);
+    expect(await keys()).toEqual(before);
     const payload = { flow, email: 'maya@example.test', password: aSetup().input.password };
     const foreign = await app.server.inject({ method: 'POST', url: '/sign-in', payload, headers: { origin } });
     expect(foreign.statusCode).toBe(400);
+    expect(await keys()).toEqual(before);
     const submit = () => app.server.inject({ method: 'POST', url: '/sign-in', payload, headers: { origin, cookie: `aeolus_sign_in_browser=${cookie?.value ?? ''}` } });
     expect((await submit()).statusCode).toBe(303);
+    await app.server.close();
+    await database.close();
+    database = await openIdentity(container.getConnectionUri());
+    ({ app, clock } = service());
+    clock.now = 8_000_000;
     expect((await submit()).statusCode).toBe(400);
     expect((await keys()).length).toBeGreaterThan(before.length);
   } finally { await app.server.close(); }
@@ -80,8 +96,8 @@ it('stores no row for an anonymous visit and completes only a submitted browser-
 
 const origin = 'https://signin.example.test';
 const redirectUri = 'https://console.example.test/sign-in/done';
+const { privateKey } = generateKeyPairSync('ed25519');
 function service() {
-  const { privateKey } = generateKeyPairSync('ed25519');
   const clock = { now: 0 };
   const app = createService({ identity: database.identity, fleet: fleetOfMaya(), now: () => clock.now, secrets: createSecrets(), signer: createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] }), config: {
     origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'fixture-secret', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],

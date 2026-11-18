@@ -1,4 +1,5 @@
 /** Separate Postgres clients prove credential re-checks after password verification. */
+import { memoryFlowSeals } from '../../../test/support/memory-flow-seals.js';
 import { accountIdSchema } from '@aeolus-fleet/common';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
@@ -35,7 +36,7 @@ async function pausedVerification(name: string) {
   const entered = Promise.withResolvers<undefined>();
   const released = Promise.withResolvers<boolean>();
   const clock = { now: 0 };
-  const signIn = createSignIn({ identity: connection.identity, now: () => clock.now, secrets: {
+  const signIn = createSignIn({ flows: memoryFlowSeals(), identity: connection.identity, now: () => clock.now, secrets: {
     token: () => name,
     digest: (value) => Promise.resolve(`digest:${value}`),
     verifyPassword: () => { entered.resolve(undefined); return released.promise; },
@@ -59,7 +60,7 @@ describe('Postgres credential re-check under the advisory lock', () => {
       // When concurrent wrong passwords on other clients reach the threshold first.
       const allFailuresEntered = Promise.withResolvers<boolean>();
       let enteredFailures = 0;
-      const failures = await Promise.all(connections.map((connection, index) => createSignIn({ identity: connection.identity, now: () => 0, secrets: {
+      const failures = await Promise.all(connections.map((connection, index) => createSignIn({ flows: memoryFlowSeals(), identity: connection.identity, now: () => 0, secrets: {
         token: () => `failure-${index}`, digest: (value) => Promise.resolve(`digest:${value}`), verifyPassword: () => {
           enteredFailures += 1;
           if (enteredFailures === ACCOUNT_THRESHOLD) allFailuresEntered.resolve(false);
