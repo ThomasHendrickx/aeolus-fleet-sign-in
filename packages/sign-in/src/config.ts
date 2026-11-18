@@ -19,13 +19,14 @@ export type ServiceConfig = z.infer<typeof serviceConfigSchema>;
 export function readConfig(environment: Readonly<Record<string, string | undefined>>) {
   const parsed = z.object({
     DATABASE_URL: z.string().min(1), SIGN_IN_ORIGIN: httpsUrl, SIGN_IN_COOKIE_DOMAIN: z.string().min(1),
-    SIGN_IN_CLIENTS: z.string(), SIGN_IN_FLEETS: z.string(), SIGN_IN_SIGNING_KEYS: z.string(), SIGN_IN_ACTIVE_KEY_ID: z.string().min(1),
+    SIGN_IN_FLOW_SIGNING_KEY_FILE: z.string().min(1), SIGN_IN_CLIENTS: z.string(), SIGN_IN_FLEETS: z.string(), SIGN_IN_SIGNING_KEYS: z.string(), SIGN_IN_ACTIVE_KEY_ID: z.string().min(1),
     SIGN_IN_TRUSTED_PROXY: z.string().min(1).optional(), CORE_URL: z.url(), INSTALLATION_TOKEN: z.string().min(1), PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   }).parse(environment);
   const json = (value: string): unknown => JSON.parse(value);
   return {
     service: serviceConfigSchema.parse({ origin: parsed.SIGN_IN_ORIGIN, cookieDomain: parsed.SIGN_IN_COOKIE_DOMAIN, clients: json(parsed.SIGN_IN_CLIENTS), fleets: json(parsed.SIGN_IN_FLEETS), trustedProxy: parsed.SIGN_IN_TRUSTED_PROXY }),
     databaseUrl: parsed.DATABASE_URL, coreUrl: parsed.CORE_URL, installationToken: parsed.INSTALLATION_TOKEN, port: parsed.PORT,
+    flowSigningKeyFile: parsed.SIGN_IN_FLOW_SIGNING_KEY_FILE,
     activeKeyId: parsed.SIGN_IN_ACTIVE_KEY_ID, signingKeys: z.array(z.object({ id: z.string().min(1), file: z.string().min(1) })).min(1).parse(json(parsed.SIGN_IN_SIGNING_KEYS)),
   };
 }

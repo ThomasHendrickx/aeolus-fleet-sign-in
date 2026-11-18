@@ -160,9 +160,10 @@ it('stores no row for an anonymous visit and completes only a submitted browser-
 const origin = 'https://signin.example.test';
 const redirectUri = 'https://console.example.test/sign-in/done';
 const { privateKey } = generateKeyPairSync('ed25519');
+const flowPrivateKey = generateKeyPairSync('ed25519').privateKey;
 function service(identity: Identity = database.identity) {
   const clock = { now: 0 };
-  const app = createService({ identity, fleet: fleetOfMaya(), now: () => clock.now, secrets: createSecrets(), signer: createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] }), config: {
+  const app = createService({ identity, fleet: fleetOfMaya(), now: () => clock.now, secrets: createSecrets(), signer: createSigner({ flowPrivateKey, activeKeyId: 'first', keys: [{ id: 'first', privateKey }] }), config: {
     origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'fixture-secret', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
   return { app, clock };

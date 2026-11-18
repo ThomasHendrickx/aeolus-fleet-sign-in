@@ -46,7 +46,9 @@ async function main() {
       if (((await stat(key.file)).mode & 0o077) !== 0) throw new Error('Signing keys must be private');
       return { id: key.id, privateKey: createPrivateKey(await readFile(key.file, 'utf8')) };
     }));
-    const signer = createSigner({ keys, activeKeyId: config.activeKeyId });
+    if (((await stat(config.flowSigningKeyFile)).mode & 0o077) !== 0) throw new Error('Flow signing key must be private');
+    const flowPrivateKey = createPrivateKey(await readFile(config.flowSigningKeyFile, 'utf8'));
+    const signer = createSigner({ keys, activeKeyId: config.activeKeyId, flowPrivateKey });
     const service = createService({ identity: database.identity, fleet, signer, secrets: createSecrets(), now: () => Date.now(), config: config.service });
     if (args[0] === 'setup') {
       try {

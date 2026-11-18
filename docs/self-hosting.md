@@ -23,6 +23,7 @@ INSTALLATION_TOKEN=<same-server-only-installation-token-as-core>
 SIGN_IN_ORIGIN=https://signin.example.test
 SIGN_IN_COOKIE_DOMAIN=example.test
 SIGN_IN_ACTIVE_KEY_ID=first
+SIGN_IN_FLOW_SIGNING_KEY_FILE=/protected/sign-in-flow-key.pem
 SIGN_IN_SIGNING_KEYS=[{"id":"first","file":"/protected/sign-in-key.pem"}]
 SIGN_IN_CLIENTS=[{"id":"console","secret":"<console-client-secret>","redirectUri":"https://console.example.test/sign-in/done"},{"id":"gateway","secret":"<gateway-client-secret>","redirectUri":"https://bridge.example.test/sign-in/done"},{"id":"gateway-chats","secret":"<gateway-chats-client-secret>","redirectUri":"https://bridge.example.test/pagasae/callback"}]
 SIGN_IN_FLEETS=[{"id":"<existing-fleet-id>","name":"workshop","consoleUrl":"https://console.example.test","gatewayUrl":"https://bridge.example.test"}]
@@ -114,6 +115,10 @@ Restore with browser ingress stopped, and stop every sign-in instance while rest
 6. Before opening browser ingress, check the same account id and person ship against the protected backup and core history. Sign in normally, obtain a fresh fleet token and check the same person ship and Bridge history. Released agents require crews again. Repeat this restore walk on an isolated installation when testing backups; a stored dump alone does not prove recovery.
 
 Do not manufacture a new account id or person commission key to repair a missing mapping. Removal with a missing mapping retries the original person commission key, persists the returned mapping and only then clears labels and releases it. This finds the person after a lost reply, or commissions it if the original request never landed; it does not grant account rights. Enabled fleet managers reconcile the existing `person-<account id>` key when obtaining their next token. Restored pending setup can resume only where access has not been removed. Private signing material, installation credentials and dumps must stay encrypted and access-restricted in backup storage. Store configuration and key backups separately from public repository and image artifacts.
+
+
+Generate a separate Ed25519 flow key with `aeolus-sign-in keygen --file /protected/sign-in-flow-key.pem` and configure `SIGN_IN_FLOW_SIGNING_KEY_FILE`. Keep this file private, back it up with protected signing material, and share it across serving instances so browser flows survive restarts and instance changes. Never add this key to `SIGN_IN_SIGNING_KEYS` or publish its public key. Flow verification uses only this key; account-token key publication and rotation remain as described above. Replacing the flow key invalidates pending sign-in forms; those browsers must start sign-in again.
+
 
 Rotate keys through protected server configuration:
 
