@@ -61,8 +61,8 @@ export interface Secrets {
 }
 
 export interface PersonFleets {
-  /** Reconciles every offered scope and the existing person installation commission key; core may refuse the installation. */
-  reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<{ readonly kind: 'reconciled'; readonly right: FleetRight } | { readonly kind: 'installationRefused' }>;
+  /** Reconciles every offered scope and the existing person installation commission key; expected core outages and installation refusals are values; unexpected failures reject. */
+  reconcile(input: { accountId: AccountId; fleetId: FleetId }): Promise<{ readonly kind: 'reconciled'; readonly right: FleetRight } | { readonly kind: 'installationRefused' } | { readonly kind: 'unavailable' }>;
 }
 
 export interface SharedSignIn {

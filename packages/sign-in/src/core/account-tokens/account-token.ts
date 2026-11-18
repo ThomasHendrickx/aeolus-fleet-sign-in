@@ -16,30 +16,26 @@ const MILLISECONDS = 1000;
 
 export function createAccountToken(deps: { identity: Identity; fleet: PersonFleets; signIn: Pick<ReturnType<typeof createSignIn>, 'account'>; signer: AccountTokenSigner; issuer: string; now: () => number }) {
   return async (input: { signIn: string; fleetId: FleetId }) => {
-    try {
-      const shared = await deps.signIn.account(input.signIn);
-      if (shared.kind === 'signedOut') return shared;
-      const { account } = shared;
-      return await deps.identity.transaction(async (records) => {
-        const current = await records.accountById(account.id);
-        if (current === null || current.isDisabled || current.accessVersion !== account.accessVersion) return { kind: 'signedOut' as const };
-        const right = await records.right({ accountId: account.id, fleetId: input.fleetId });
-        if (right === null || (right.scopes.length === 0 && !right.isFleetManager)) return { kind: 'noRights' as const };
-        const fleetRight = right.isFleetManager ? await deps.fleet.reconcile({ accountId: account.id, fleetId: input.fleetId }) : { kind: 'reconciled' as const, right };
-        if (fleetRight.kind === 'installationRefused') return { kind: 'unavailable' as const };
-        const reconciled = fleetRight.right;
-        await records.saveRight(reconciled);
-        const issuedAt = Math.floor(deps.now() / MILLISECONDS);
-        const token = await deps.signer.sign({
-          iss: deps.issuer, aud: input.fleetId, sub: account.id, org: account.organisationId,
-          scope: reconciled.scopes.join(' '), group: [...reconciled.groupValues],
-          ...(reconciled.personShipId === null ? {} : { person_ship: reconciled.personShipId }),
-          argo: false, iat: issuedAt, exp: issuedAt + TOKEN_SECONDS,
+    const shared = await deps.signIn.account(input.signIn);
+    if (shared.kind === 'signedOut') return shared;
+    const { account } = shared;
+    return await deps.identity.transaction(async (records) => {
+      const current = await records.accountById(account.id);
+      if (current === null || current.isDisabled || current.accessVersion !== account.accessVersion) return { kind: 'signedOut' as const };
+      const right = await records.right({ accountId: account.id, fleetId: input.fleetId });
+      if (right === null || (right.scopes.length === 0 && !right.isFleetManager)) return { kind: 'noRights' as const };
+      const fleetRight = right.isFleetManager ? await deps.fleet.reconcile({ accountId: account.id, fleetId: input.fleetId }) : { kind: 'reconciled' as const, right };
+      if (fleetRight.kind === 'installationRefused' || fleetRight.kind === 'unavailable') return { kind: 'unavailable' as const };
+      const reconciled = fleetRight.right;
+      await records.saveRight(reconciled);
+      const issuedAt = Math.floor(deps.now() / MILLISECONDS);
+      const token = await deps.signer.sign({
+        iss: deps.issuer, aud: input.fleetId, sub: account.id, org: account.organisationId,
+        scope: reconciled.scopes.join(' '), group: [...reconciled.groupValues],
+        ...(reconciled.personShipId === null ? {} : { person_ship: reconciled.personShipId }),
+        argo: false, iat: issuedAt, exp: issuedAt + TOKEN_SECONDS,
       });
       return { kind: 'token' as const, token, expiresIn: TOKEN_SECONDS };
-      });
-    } catch {
-      return { kind: 'unavailable' as const };
-    }
+    });
   };
 }

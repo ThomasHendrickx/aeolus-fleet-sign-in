@@ -26,7 +26,7 @@ export function fleetOfMaya(identity?: Identity) {
       const key = `person-${input.accountId}`;
       const personShipId = people.get(key) ?? 'shp_00000000000000000000000001';
       people.set(key, personShipId);
-      if (fleet.shouldLoseConfirmation) return Promise.reject(new Error('Confirmation lost'));
+      if (fleet.shouldLoseConfirmation) return Promise.resolve({ kind: 'unavailable' as const });
       return Promise.resolve({ kind: 'reconciled' as const, right: { ...input, personShipId, scopes: ['messages:send', 'messages:receive', 'fleet:read', 'fleet:commission'], groupValues: ['fleet-manager'], isFleetManager: true } });
     },
   };

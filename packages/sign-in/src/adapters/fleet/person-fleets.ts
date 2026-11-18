@@ -23,6 +23,17 @@ const HTTP_FORBIDDEN = 403;
 /** Core refused the installation token: a configuration problem, reported as such rather than as an outage. */
 class InstallationRefused extends Error {}
 
+/** An expected request failure, distinct from malformed answers and local defects. */
+class CoreUnavailable extends Error {}
+
+function isNetworkFailure(error: unknown): boolean {
+  if (error instanceof DOMException) return error.name === 'TimeoutError' || error.name === 'AbortError';
+  if (!(error instanceof TypeError)) return false;
+  const cause = z.object({ code: z.string() }).safeParse(error.cause);
+  if (!cause.success) return false;
+  return /^(ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EPIPE|UND_ERR_(CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET))$/.test(cause.data.code);
+}
+
 export function createPersonFleets(options: { url: string; installationToken: string }) {
   const url = options.url.replace(/\/$/, '');
 
@@ -34,7 +45,7 @@ export function createPersonFleets(options: { url: string; installationToken: st
       signal: input.signal ?? AbortSignal.timeout(TIMEOUT_MS), redirect: 'error',
     });
     if (response.status === HTTP_UNAUTHORIZED || response.status === HTTP_FORBIDDEN) throw new InstallationRefused();
-    if (!response.ok) throw new Error('Core refused the installation request');
+    if (!response.ok) throw new CoreUnavailable();
     const result: unknown = await response.json();
     return input.path.startsWith('/trpc/') ? z.object({ result: z.object({ data: z.unknown() }) }).parse(result).result.data : result;
   }
@@ -78,6 +89,7 @@ export function createPersonFleets(options: { url: string; installationToken: st
       try { return { kind: 'reconciled' as const, right: await reconcileRight(input) }; }
       catch (error) {
         if (error instanceof InstallationRefused) return { kind: 'installationRefused' as const };
+        if (error instanceof CoreUnavailable || isNetworkFailure(error)) return { kind: 'unavailable' as const };
         throw error;
       }
     },
