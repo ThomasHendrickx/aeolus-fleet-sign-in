@@ -2,7 +2,7 @@
 
 `@aeolus-fleet/sign-in` signs a named person into an existing self-hosted fleet. It owns local credentials, shared browser sign-ins, fleet-manager grants and stable person-ship mappings. Core keeps ships and messages; gateway provides Bridge.
 
-The first journey follows the [approved design](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/design/self-hosted-sign-in.md) and [aeolus-fleet #1810](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1810). Returning sign-in and token lifecycle follow [#1811](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1811). The [approved screen set](docs/mockups/first-journey/README.md) is retained for comparison.
+The first journey follows the [approved design](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/design/self-hosted-sign-in.md) and [aeolus-fleet #1810](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1810). Returning sign-in and token lifecycle follow [#1811](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1811).
 
 Run from source with Node 26 and npm:
 
