@@ -42,7 +42,7 @@ export function createPersonFleets(options: { url: string; installationToken: st
       method: input.body === undefined ? 'GET' : 'POST',
       headers: { 'content-type': 'application/json', 'x-aeolus-installation-token': options.installationToken, ...(input.fleetId === undefined ? {} : { 'aeolus-fleet': input.fleetId }) },
       ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-      signal: input.signal ?? AbortSignal.timeout(TIMEOUT_MS), redirect: 'error',
+      signal: input.signal ?? AbortSignal.timeout(TIMEOUT_MS), redirect: 'manual',
     });
     if (response.status === HTTP_UNAUTHORIZED || response.status === HTTP_FORBIDDEN) throw new InstallationRefused();
     if (!response.ok) throw new CoreUnavailable();

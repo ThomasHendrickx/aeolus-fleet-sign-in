@@ -2,12 +2,14 @@
 import type { accountTokenClaimsSchema, FleetId, ShipId } from '@aeolus-fleet/common';
 import type { z } from 'zod';
 
+import { IssuerUnavailable } from './issuer-unavailable.js';
 import type { createSignIn } from '../sign-in/sign-in.js';
 import type { Identity, PersonFleets } from '../shared/identity.js';
 
 export type FleetClaims = Omit<z.input<typeof accountTokenClaimsSchema>, 'aud' | 'person_ship'> & { readonly aud: FleetId; readonly person_ship?: ShipId };
 
 export interface AccountTokenSigner {
+  /** Rejects with IssuerUnavailable for an expected issuer outage. */
   sign(claims: FleetClaims): Promise<string>;
 }
 
@@ -34,7 +36,11 @@ export function createAccountToken(deps: { identity: Identity; fleet: PersonFlee
         scope: reconciled.scopes.join(' '), group: [...reconciled.groupValues],
         ...(reconciled.personShipId === null ? {} : { person_ship: reconciled.personShipId }),
         argo: false, iat: issuedAt, exp: issuedAt + TOKEN_SECONDS,
+      }).catch((error: unknown) => {
+        if (error instanceof IssuerUnavailable) return null;
+        return Promise.reject(error instanceof Error ? error : new Error('Unexpected signing rejection', { cause: error }));
       });
+      if (token === null) return { kind: 'unavailable' as const };
       return { kind: 'token' as const, token, expiresIn: TOKEN_SECONDS };
     });
   };
