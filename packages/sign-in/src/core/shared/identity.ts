@@ -23,7 +23,13 @@ export interface FleetRight {
   readonly isFleetManager: boolean;
 }
 
+export interface AuthorizationSeals {
+  seal(authorization: Authorization): Promise<string>;
+  open(flow: string): Promise<Authorization | null>;
+}
+
 export interface IdentityRecords {
+  purgeExpired(input: { now: number; attemptsBefore: number; revokedBefore: number }): Promise<void>;
   rights(accountId: AccountId): Promise<readonly FleetRight[]>;
   revokeSharedSignIns(accountId: AccountId): Promise<void>;
   pendingCleanup(accountId?: AccountId): Promise<CleanupTarget | null>;

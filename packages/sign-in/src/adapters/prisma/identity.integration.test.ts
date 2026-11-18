@@ -1,4 +1,5 @@
 /** Postgres proves setup convergence, transaction rollback and sign-in state after restart. */
+import { memoryFlowSeals } from '../../../test/support/memory-flow-seals.js';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -46,14 +47,14 @@ describe('durable identity across rollback concurrency and restart', () => {
     const entered = Promise.withResolvers<undefined>();
     const released = Promise.withResolvers<boolean>();
     const secrets = { token: () => `concurrency-${++sequence}`, digest: (value: string) => Promise.resolve(`digest:${value}`), verifyPassword: () => Promise.resolve(true) };
-    const signIn = createSignIn({ identity: database.identity, now: () => 2_000_000, secrets });
+    const signIn = createSignIn({ flows: memoryFlowSeals(), identity: database.identity, now: () => 2_000_000, secrets });
     const shared = await signIn.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'concurrency' });
     if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
     const flow = await signIn.begin({ clientId: 'console', redirectUri: 'https://console.example.test/done', state: 'state', codeChallenge: 'digest:verifier', browser: 'browser' });
     const completed = await signIn.complete({ flow: flow.flow, browser: 'browser', signIn: shared.signIn });
     if (completed.kind !== 'authorized') throw new Error('Expected code');
     const other = await openIdentity(container.getConnectionUri());
-    const slow = createSignIn({ identity: other.identity, now: () => 2_000_000, secrets: { ...secrets, verifyPassword: () => { entered.resolve(undefined); return released.promise; } } });
+    const slow = createSignIn({ flows: memoryFlowSeals(), identity: other.identity, now: () => 2_000_000, secrets: { ...secrets, verifyPassword: () => { entered.resolve(undefined); return released.promise; } } });
     const pending = slow.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'slow' });
     await entered.promise;
     let results: string[] = [];
@@ -86,7 +87,7 @@ describe('durable identity across rollback concurrency and restart', () => {
     expect(await database.identity.transaction((records) => records.account('rollback@example.test'))).toBeNull();
     let sequence = 0;
     const options = { now: () => 0, secrets: { token: () => `secret-${++sequence}`, digest: (value: string) => Promise.resolve(`digest:${value}`), verifyPassword: ({ password }: { password: string; hash: string | null }) => Promise.resolve(password === 'private-password') } };
-    const signIn = createSignIn({ ...options, identity: database.identity });
+    const signIn = createSignIn({ flows: memoryFlowSeals(), ...options, identity: database.identity });
     const authenticated = await signIn.authenticate({ email: original.email, password: 'private-password', address: 'address' });
     if (authenticated.kind !== 'authenticated') throw new Error('Expected authentication');
     const flow = await signIn.begin({ clientId: 'console', redirectUri: 'https://console.example.test/sign-in/done', state: 'state', codeChallenge: 'digest:verifier', browser: 'browser' });
@@ -97,7 +98,7 @@ describe('durable identity across rollback concurrency and restart', () => {
     // When the database is reopened and the same code is redeemed concurrently.
     await database.close();
     database = await openIdentity(container.getConnectionUri());
-    const restarted = createSignIn({ ...options, identity: database.identity });
+    const restarted = createSignIn({ flows: memoryFlowSeals(), ...options, identity: database.identity });
     const results = await Promise.all([1, 2].map(() => restarted.redeem({ code: authorized.code, clientId: 'console', redirectUri: 'https://console.example.test/sign-in/done', verifier: 'verifier' })));
 
     // Then the code succeeds only once, and both the shared sign-in and credential refusal remain durable.
@@ -111,7 +112,7 @@ describe('durable identity across rollback concurrency and restart', () => {
     await createSetup({ identity: database.identity, fleet, secrets: aSetup().secrets }).establish(aSetup().input);
     let sequence = 0;
     const options = { now: () => 900_000, secrets: { token: () => `revocation-${++sequence}`, digest: (value: string) => Promise.resolve(`digest:${value}`), verifyPassword: () => Promise.resolve(true) } };
-    const signIn = createSignIn({ ...options, identity: database.identity });
+    const signIn = createSignIn({ flows: memoryFlowSeals(), ...options, identity: database.identity });
     const shared = await signIn.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'revocation-browser' });
     if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
     const hash = `digest:${shared.signIn}`;
@@ -129,7 +130,7 @@ describe('durable identity across rollback concurrency and restart', () => {
     expect(await Promise.all([signOut(shared.signIn), signOut(shared.signIn)])).toEqual([{ kind: 'unavailable' }, { kind: 'unavailable' }]);
     await database.close();
     database = await openIdentity(container.getConnectionUri());
-    const restarted = createSignIn({ ...options, identity: database.identity });
+    const restarted = createSignIn({ flows: memoryFlowSeals(), ...options, identity: database.identity });
     fleet.shouldFailSignOut = false;
 
     // Then neither app can use the shared sign-in, while retry still resolves its original account for core.

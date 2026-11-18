@@ -1,6 +1,6 @@
 /** Durable browser-bound authorization and fixed-lifetime shared sign-ins. */
 import { normalisedEmail } from '../accounts/email.js';
-import type { Authorization, FailedAttempts, Identity, IdentityRecords, SharedSignIn, SignInSecrets } from '../shared/identity.js';
+import type { Authorization, AuthorizationSeals, FailedAttempts, Identity, IdentityRecords, SharedSignIn, SignInSecrets } from '../shared/identity.js';
 
 /** Failures count within this window, and reaching a limit refuses attempts for as long. */
 export const ATTEMPT_WINDOW = 15 * 60 * 1000;
@@ -8,22 +8,22 @@ const ACCOUNT_FAILURES = 5;
 const ADDRESS_FAILURES = 20;
 const SHARED_SIGN_IN_LIFE = 12 * 60 * 60 * 1000;
 /** A revoked shared sign-in stays this long so a client can retry a sign-out that core did not finish. */
-const REVOKED_RETRY_WINDOW = 15 * 60 * 1000;
+export const REVOKED_RETRY_WINDOW = 15 * 60 * 1000;
 const FLOW_LIFE = 10 * 60 * 1000;
 
-export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets; now: () => number }) {
+export function createSignIn(deps: { identity: Identity; flows: AuthorizationSeals; secrets: SignInSecrets; now: () => number }) {
   const digest = (value: string) => deps.secrets.digest(value);
   const transaction = deps.identity.transaction.bind(deps.identity);
 
-  async function openFlow(records: IdentityRecords, input: { flowHash: string; browser: string }) {
-    const flow = await records.authorization(input.flowHash);
+  async function openFlow(records: IdentityRecords, input: { flow: string; browser: string }) {
+    const flow = await deps.flows.open(input.flow);
+    if (await records.authorization(await digest(input.flow)) !== null) return null;
     return flow !== null && flow.expiresAt > deps.now() && flow.browser === await digest(input.browser) ? flow : null;
   }
 
   /** An expired, other-browser or refused flow starts again at the client that began it, when known. */
   async function startAgain(flow: string) {
-    const flowHash = await digest(flow);
-    const held = await transaction((records) => records.authorization(flowHash));
+    const held = await deps.flows.open(flow);
     return { kind: 'startAgain' as const, clientId: held?.clientId ?? null };
   }
 
@@ -90,24 +90,22 @@ export function createSignIn(deps: { identity: Identity; secrets: SignInSecrets;
       });
     },
     async begin(input: Omit<Authorization, 'expiresAt'>) {
-      const flow = deps.secrets.token();
-      await transaction(async (records) => records.saveAuthorization({ hash: await digest(flow), authorization: { ...input, browser: await digest(input.browser), expiresAt: deps.now() + FLOW_LIFE } }));
+      const flow = await deps.flows.seal({ ...input, browser: await digest(input.browser), expiresAt: deps.now() + FLOW_LIFE });
       return { flow };
     },
     async inspect(input: { flow: string; browser: string }) {
-      const flowHash = await digest(input.flow);
-      return transaction(async (records) => await openFlow(records, { flowHash, browser: input.browser }) !== null);
+      return transaction(async (records) => await openFlow(records, { flow: input.flow, browser: input.browser }) !== null);
     },
     async complete(input: { flow: string; browser: string; signIn: string }) {
-      const flowHash = await digest(input.flow);
       return transaction(async (records) => {
-        const flow = await openFlow(records, { flowHash, browser: input.browser });
+        const flow = await openFlow(records, { flow: input.flow, browser: input.browser });
         if (flow === null) return { kind: 'invalidFlow' as const };
         const signInHash = await digest(input.signIn);
         if (await accountIn(records, signInHash) === null) return { kind: 'signedOut' as const };
         const code = deps.secrets.token();
         await records.saveCode({ hash: await digest(code), code: { clientId: flow.clientId, redirectUri: flow.redirectUri, codeChallenge: flow.codeChallenge, signInHash, expiresAt: flow.expiresAt } });
-        await records.deleteAuthorization(flowHash);
+        // Remember consumption until the sealed flow expires, so it cannot mint a second code.
+        await records.saveAuthorization({ hash: await digest(input.flow), authorization: flow });
         return { kind: 'authorized' as const, code, redirectUri: flow.redirectUri, state: flow.state };
       });
     },

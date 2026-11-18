@@ -1,4 +1,5 @@
 /** Approved removal and recovery preserve the same person and retry cleanup. */
+import { memoryFlowSeals } from '../../../test/support/memory-flow-seals.js';
 import { describe, expect, it } from 'vitest';
 
 import { memoryIdentity } from '../../../test/support/memory-identity.js';
@@ -76,7 +77,7 @@ describe('durable access removal and recovery', () => {
     expect(await given.access.recover({ accountId: given.accountId, password: 'replacement-password', shouldEnable: false, fleetId: null })).toEqual({ kind: 'recovered' });
     expect(await given.identity.transaction((records) => records.accountById(given.accountId))).toMatchObject({ isDisabled: true });
     expect(await given.access.recover({ accountId: given.accountId, password: 'replacement-password', shouldEnable: true, fleetId: null })).toEqual({ kind: 'recovered' });
-    const signIn = createSignIn({ identity: given.identity, now: () => 1000, secrets: { token: () => 'new-shared-session', digest: (value) => Promise.resolve(value), verifyPassword: ({ password, hash }) => Promise.resolve(hash === `hash:${password}`) } });
+    const signIn = createSignIn({ flows: memoryFlowSeals(), identity: given.identity, now: () => 1000, secrets: { token: () => 'new-shared-session', digest: (value) => Promise.resolve(value), verifyPassword: ({ password, hash }) => Promise.resolve(hash === `hash:${password}`) } });
     expect(await signIn.authenticate({ email: aSetup().input.email, password: aSetup().input.password, address: 'browser' })).toEqual({ kind: 'wrongCredential' });
     expect((await signIn.authenticate({ email: aSetup().input.email, password: 'replacement-password', address: 'browser' })).kind).toBe('authenticated');
 

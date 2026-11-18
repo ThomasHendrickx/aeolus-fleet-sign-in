@@ -13,6 +13,13 @@ export function memoryIdentity() {
   const attempts = new Map<string, FailedAttempts>();
   let previous: Promise<unknown> = Promise.resolve();
   const records: IdentityRecords = {
+    purgeExpired: ({ now, attemptsBefore, revokedBefore }) => {
+      for (const [key, value] of authorizations) if (value.expiresAt <= now) authorizations.delete(key);
+      for (const [key, value] of codes) if (value.expiresAt <= now) codes.delete(key);
+      for (const [key, value] of sharedSignIns) if (value.expiresAt <= now && (value.revokedAt === undefined || value.revokedAt <= revokedBefore)) sharedSignIns.delete(key);
+      for (const [key, value] of attempts) if (value.refusedUntil <= now && !value.failures.some((at) => at > attemptsBefore)) attempts.delete(key);
+      return Promise.resolve();
+    },
     rights: (accountId) => Promise.resolve([...rights.values()].filter((right) => right.accountId === accountId)),
     revokeSharedSignIns: (accountId) => { for (const [hash, shared] of sharedSignIns) if (shared.accountId === accountId) sharedSignIns.delete(hash); return Promise.resolve(); },
     pendingCleanup: (accountId) => Promise.resolve([...cleanup.values()].sort((left, right) => left.attempts - right.attempts).find((target) => accountId === undefined || target.accountId === accountId) ?? null),

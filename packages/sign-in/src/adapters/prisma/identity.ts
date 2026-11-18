@@ -36,6 +36,15 @@ function recordsOf(client: Prisma.TransactionClient): IdentityRecords {
   const save = async (key: string, data: Prisma.InputJsonObject) => { await client.identityRecord.upsert({ where: { key }, create: { key, data }, update: { data } }); };
   const remove = async (key: string) => { await client.identityRecord.deleteMany({ where: { key } }); };
   return {
+    purgeExpired: async ({ now, attemptsBefore, revokedBefore }) => {
+      await client.$executeRaw`DELETE FROM identity_records WHERE
+        ((key LIKE 'authorization/%' OR key LIKE 'code/%') AND (data->>'expiresAt')::numeric <= ${now})
+        OR (key LIKE 'shared-sign-in/%' AND (data->>'expiresAt')::numeric <= ${now}
+          AND (NOT (data ? 'revokedAt') OR (data->>'revokedAt')::numeric <= ${revokedBefore}))
+        OR (key LIKE 'attempts/%' AND (data->>'refusedUntil')::numeric <= ${now}
+          AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(data->'failures') AS failure(at)
+            WHERE at::numeric > ${attemptsBefore}))`;
+    },
     rights: async (accountId) => (await client.fleetRight.findMany({ where: { accountId } })).map((row) => { const right = rightOf(row); if (right === null) throw new Error('Expected right'); return right; }),
     revokeSharedSignIns: async (accountId) => { await client.$executeRaw`DELETE FROM identity_records WHERE key LIKE 'shared-sign-in/%' AND data->>'accountId' = ${accountId}`; },
     pendingCleanup: async (accountId) => nullable(cleanupSchema, await client.cleanupTarget.findFirst({ where: accountId === undefined ? {} : { accountId }, orderBy: [{ attempts: 'asc' }, { id: 'asc' }] })),
