@@ -75,7 +75,7 @@ describe('the first person owns and answers the same agent', () => {
       const fleet = z.object({ result: z.object({ data: installationFleetsCreateOutputSchema }) }).parse(made).result.data;
       const secrets = createSecrets();
       const { privateKey } = generateKeyPairSync('ed25519');
-      service = createService({ identity: database.identity, fleet: createPersonFleets({ url: coreUrl, installationToken }), secrets, signer: createSigner({ activeKeyId: 'journey', keys: [{ id: 'journey', privateKey }] }), now: () => Date.now(), config: {
+      service = createService({ identity: database.identity, fleet: createPersonFleets({ url: coreUrl, installationToken }), secrets, signer: createSigner({ flowPrivateKey: generateKeyPairSync('ed25519').privateKey, activeKeyId: 'journey', keys: [{ id: 'journey', privateKey }] }), now: () => Date.now(), config: {
         origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri: 'https://console.example.test/sign-in/done' }], fleets: [{ id: fleet.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
       } });
       const setupInput = { fleetId: fleet.fleetId, email: 'maya@example.test', displayName: 'Maya', password: 'journey-password-fixture' };

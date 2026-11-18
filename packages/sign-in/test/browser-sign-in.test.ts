@@ -26,7 +26,7 @@ async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: st
   const real = createSecrets({ passwordCost: FIXTURE_PASSWORD_COST });
   const secrets = { ...real, verifyPassword: (input: { password: string; hash: string | null }) => isUnavailable() ? Promise.reject(new Error('Credential processing failed')) : real.verifyPassword(input) };
   const { privateKey } = generateKeyPairSync('ed25519');
-  const realSigner = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
+  const realSigner = createSigner({ flowPrivateKey: generateKeyPairSync('ed25519').privateKey, activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
   const signer = { ...realSigner, sign: (claims: Parameters<typeof realSigner.sign>[0]) => isIssuerUnavailable() ? Promise.reject(new IssuerUnavailable()) : realSigner.sign(claims) };
   const app = createService({ identity, fleet, secrets, signer, now, config: {
     origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client, gatewayClient], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],

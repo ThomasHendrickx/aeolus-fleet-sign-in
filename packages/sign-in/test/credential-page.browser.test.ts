@@ -28,7 +28,7 @@ describe('approved credential screens', () => {
     const secrets = createSecrets();
     const waiting = Promise.withResolvers<undefined>();
     const { privateKey } = generateKeyPairSync('ed25519');
-    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => Date.now(), secrets: { ...secrets, verifyPassword: async (input) => { await waiting.promise; return secrets.verifyPassword(input); } }, config: {
+    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ flowPrivateKey: generateKeyPairSync('ed25519').privateKey, activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => Date.now(), secrets: { ...secrets, verifyPassword: async (input) => { await waiting.promise; return secrets.verifyPassword(input); } }, config: {
       origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
     } });
     try {
@@ -92,7 +92,7 @@ describe('approved credential screens', () => {
     const secrets = createSecrets();
     const clock = { now: Date.now() };
     const { privateKey } = generateKeyPairSync('ed25519');
-    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => clock.now, secrets, config: {
+    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ flowPrivateKey: generateKeyPairSync('ed25519').privateKey, activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => clock.now, secrets, config: {
       origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
     } });
     try {
@@ -138,7 +138,7 @@ describe('approved credential screens', () => {
     const secrets = createSecrets();
     const { privateKey } = generateKeyPairSync('ed25519');
     const isUnavailable = scene === '23-credential-unavailable';
-    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => Date.UTC(2026, 10, 14, 14, 30), secrets: { ...secrets, verifyPassword: (input) => isUnavailable ? Promise.reject(new Error('Credential processing failed')) : secrets.verifyPassword(input) }, config: {
+    const service = createService({ identity, fleet: fleetOfMaya(identity), signer: createSigner({ flowPrivateKey: generateKeyPairSync('ed25519').privateKey, activeKeyId: 'one', keys: [{ id: 'one', privateKey }] }), now: () => Date.UTC(2026, 10, 14, 14, 30), secrets: { ...secrets, verifyPassword: (input) => isUnavailable ? Promise.reject(new Error('Credential processing failed')) : secrets.verifyPassword(input) }, config: {
       origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'client-fixture', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
     } });
     try {
