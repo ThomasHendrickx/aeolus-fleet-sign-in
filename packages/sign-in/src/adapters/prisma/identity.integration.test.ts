@@ -39,6 +39,42 @@ describe('durable identity across rollback concurrency and restart', () => {
     expect(await database.identity.transaction((records) => records.right({ accountId: aSetup().secrets.accountId(), fleetId: 'flt_00000000000000000000000001' }))).toMatchObject({ personShipId: 'shp_00000000000000000000000001', isFleetManager: true });
   });
 
+  it('keeps identity transitions available during password verification across database connections', async () => {
+    // Given a live shared sign-in and a password check paused on another connection.
+    await createSetup({ identity: database.identity, fleet: fleetOfMaya(), secrets: aSetup().secrets }).establish(aSetup().input);
+    let sequence = 0;
+    const entered = Promise.withResolvers<undefined>();
+    const released = Promise.withResolvers<boolean>();
+    const secrets = { token: () => `concurrency-${++sequence}`, digest: (value: string) => Promise.resolve(`digest:${value}`), verifyPassword: () => Promise.resolve(true) };
+    const signIn = createSignIn({ identity: database.identity, now: () => 2_000_000, secrets });
+    const shared = await signIn.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'concurrency' });
+    if (shared.kind !== 'authenticated') throw new Error('Expected authentication');
+    const flow = await signIn.begin({ clientId: 'console', redirectUri: 'https://console.example.test/done', state: 'state', codeChallenge: 'digest:verifier', browser: 'browser' });
+    const completed = await signIn.complete({ flow: flow.flow, browser: 'browser', signIn: shared.signIn });
+    if (completed.kind !== 'authorized') throw new Error('Expected code');
+    const other = await openIdentity(container.getConnectionUri());
+    const slow = createSignIn({ identity: other.identity, now: () => 2_000_000, secrets: { ...secrets, verifyPassword: () => { entered.resolve(undefined); return released.promise; } } });
+    const pending = slow.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'slow' });
+    await entered.promise;
+    let results: string[] = [];
+    let progress: Promise<void> = Promise.resolve();
+    try {
+      // When other connections authenticate, read a shared sign-in and redeem the same code twice.
+      const redeem = () => signIn.redeem({ code: completed.code, clientId: 'console', redirectUri: completed.redirectUri, verifier: 'verifier' });
+      progress = Promise.all([
+        signIn.authenticate({ email: 'maya@example.test', password: 'private-password', address: 'fast' }),
+        signIn.account(shared.signIn), redeem(), redeem(),
+      ]).then((outcomes) => { results = outcomes.map((outcome) => outcome.kind).sort(); });
+
+      // Then they finish before the password is released and only one redemption succeeds.
+      await expect.poll(() => results, { timeout: 2000 }).toEqual(['account', 'authenticated', 'invalidGrant', 'redeemed']);
+    } finally {
+      released.resolve(true);
+      await Promise.all([pending, progress]);
+      await other.close();
+    }
+  });
+
   it('rolls back partial identity changes and preserves code one-use and refusal counters after restart', async () => {
     // Given an account write interrupted before its transaction commits.
     const original = await database.identity.transaction((records) => records.account('maya@example.test'));
