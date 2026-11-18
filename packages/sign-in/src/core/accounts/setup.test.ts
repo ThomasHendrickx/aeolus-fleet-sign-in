@@ -6,6 +6,23 @@ import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
 import { createSetup } from './setup.js';
 
 describe('first trusted setup', () => {
+  it.each(['establish', 'resume'])('surfaces an unexpected provisioning error during %s and retains the saved identity', async (operation) => {
+    // Given a saved account and a programming error during provisioning.
+    const identity = memoryIdentity();
+    const fleet = fleetOfMaya(identity);
+    await createSetup({ identity, fleet, secrets: aSetup().secrets }).establish(aSetup().input);
+    const failure = new TypeError('Unexpected provisioning defect');
+    const setup = createSetup({ identity, secrets: aSetup().secrets, fleet: { reconcile: () => Promise.reject(failure) } });
+
+    // When setup establishes or resumes provisioning.
+    const provisioning = operation === 'establish' ? setup.establish(aSetup().input) : setup.resume({ accountId: aSetup().secrets.accountId(), fleetId: aSetup().input.fleetId });
+
+    // Then the original error reaches the caller and the same identity remains saved.
+    await expect(provisioning).rejects.toBe(failure);
+    expect(identity.accounts.size).toBe(1);
+    expect(identity.accounts.get(aSetup().input.email)?.id).toBe(aSetup().secrets.accountId());
+  });
+
   it('persists the opaque account before provisioning and gives Maya fleet-manager rights without argo', async () => {
     // Given an existing fleet and trusted setup with a privately supplied password.
     const identity = memoryIdentity();
