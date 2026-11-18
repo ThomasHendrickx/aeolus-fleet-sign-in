@@ -1,0 +1,94 @@
+/** Owner decision: expired records disappear and an anonymous visit writes no row. */
+import { generateKeyPairSync } from 'node:crypto';
+
+import { PostgreSqlContainer } from '@testcontainers/postgresql';
+import { Pool } from 'pg';
+import { afterAll, beforeAll, expect, it } from 'vitest';
+
+import { createService } from '../../app.js';
+import { createSecrets } from '../crypto/secrets.js';
+import { createSigner } from '../crypto/signer.js';
+import { aSetup, fleetOfMaya } from '../../../test/support/setup-fixtures.js';
+import { openIdentity } from './identity.js';
+
+let container: Awaited<ReturnType<PostgreSqlContainer['start']>>;
+let database: Awaited<ReturnType<typeof openIdentity>>;
+let pool: Pool;
+beforeAll(async () => {
+  container = await new PostgreSqlContainer('postgres:17-alpine').start();
+  database = await openIdentity(container.getConnectionUri());
+  pool = new Pool({ connectionString: container.getConnectionUri() });
+}, 120_000);
+afterAll(async () => { await pool.end(); await database.close(); await container.stop(); }, 60_000);
+
+it('deletes expired sign-in records at startup and hourly while preserving live records', async () => {
+  // Given expired and live flows, codes, shared sign-ins and failed attempts.
+  const { app, clock } = service();
+  const accountId = aSetup().secrets.accountId();
+  await database.identity.transaction(async (records) => {
+    for (const { hash, expiresAt } of [{ hash: 'expired', expiresAt: 0 }, { hash: 'live', expiresAt: 7_200_000 }]) {
+      await records.saveAuthorization({ hash, authorization: { clientId: 'console', redirectUri, state: 'state', codeChallenge: 'challenge', browser: 'browser', expiresAt } });
+      await records.saveCode({ hash, code: { clientId: 'console', redirectUri, codeChallenge: 'challenge', signInHash: 'shared', expiresAt } });
+      await records.saveSharedSignIn({ hash, sharedSignIn: { accountId, expiresAt } });
+    }
+    await records.saveSharedSignIn({ hash: 'retry', sharedSignIn: { accountId, expiresAt: 0, revokedAt: 900_000 } });
+    await records.saveAttempts({ key: 'expired', attempts: { failures: [0], refusedUntil: 0 } });
+    await records.saveAttempts({ key: 'live', attempts: { failures: [900_000], refusedUntil: 1_800_000 } });
+  });
+  try {
+    // When the service starts and later its hourly purge runs.
+    clock.now = 900_000;
+    await app.server.ready();
+    expect(await keys()).toEqual(['attempts/live', 'authorization/live', 'code/live', 'shared-sign-in/live', 'shared-sign-in/retry']);
+    clock.now = 7_200_000;
+    await app.purge();
+    await app.purge();
+
+    // Then all expired records are physically deleted, including on an idempotent retry.
+    expect(await keys()).toEqual([]);
+  } finally { await app.server.close(); }
+});
+
+it('stores no row for an anonymous visit and completes only a submitted browser-bound flow once', async () => {
+  // Given an installation with Maya and no sign-in records.
+  const { app, clock } = service();
+  clock.now = 8_000_000;
+  await app.setup.establish(aSetup().input);
+  try {
+    await app.server.ready();
+    const before = await keys();
+    const query = new URLSearchParams({ response_type: 'code', client_id: 'console', redirect_uri: redirectUri, state: 'state', code_challenge: await createSecrets().digest('verifier'), code_challenge_method: 'S256' });
+
+    // When an anonymous browser visits repeatedly, without submitting the form.
+    const visit = await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
+    await app.server.inject({ method: 'GET', url: `/oauth/authorize?${query.toString()}` });
+
+    // Then no row is written until submission, which remains browser bound and one use.
+    expect(visit.statusCode).toBe(200);
+    expect(await keys()).toEqual(before);
+    const flow = /name="flow" value="([^"]+)"/.exec(visit.body)?.[1] ?? '';
+    const cookie = visit.cookies.find((held) => held.name === 'aeolus_sign_in_browser');
+    const payload = { flow, email: 'maya@example.test', password: aSetup().input.password };
+    const foreign = await app.server.inject({ method: 'POST', url: '/sign-in', payload, headers: { origin } });
+    expect(foreign.statusCode).toBe(400);
+    const submit = () => app.server.inject({ method: 'POST', url: '/sign-in', payload, headers: { origin, cookie: `aeolus_sign_in_browser=${cookie?.value ?? ''}` } });
+    expect((await submit()).statusCode).toBe(303);
+    expect((await submit()).statusCode).toBe(400);
+    expect((await keys()).length).toBeGreaterThan(before.length);
+  } finally { await app.server.close(); }
+});
+
+const origin = 'https://signin.example.test';
+const redirectUri = 'https://console.example.test/sign-in/done';
+function service() {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const clock = { now: 0 };
+  const app = createService({ identity: database.identity, fleet: fleetOfMaya(), now: () => clock.now, secrets: createSecrets(), signer: createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] }), config: {
+    origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'fixture-secret', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
+  } });
+  return { app, clock };
+}
+async function keys() {
+  const result = await pool.query<{ key: string }>('SELECT key FROM identity_records ORDER BY key');
+  return result.rows.map((row) => row.key);
+}
