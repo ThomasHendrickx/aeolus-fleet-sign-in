@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import { createService } from '../src/app.js';
 import { createSecrets } from '../src/adapters/crypto/secrets.js';
+import { IssuerUnavailable } from '../src/core/account-tokens/issuer-unavailable.js';
 import { createSigner } from '../src/adapters/crypto/signer.js';
 import { approvedNotice, noticeIn } from './support/approved-mockups.js';
 import { aSetup, FIXTURE_PASSWORD_COST, fleetOfMaya } from './support/setup-fixtures.js';
@@ -26,7 +27,7 @@ async function serviceOfMaya(options: { shouldSetUp?: boolean; trustedProxy?: st
   const secrets = { ...real, verifyPassword: (input: { password: string; hash: string | null }) => isUnavailable() ? Promise.reject(new Error('Credential processing failed')) : real.verifyPassword(input) };
   const { privateKey } = generateKeyPairSync('ed25519');
   const realSigner = createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] });
-  const signer = { ...realSigner, sign: (claims: Parameters<typeof realSigner.sign>[0]) => isIssuerUnavailable() ? Promise.reject(new Error('Issuer unavailable')) : realSigner.sign(claims) };
+  const signer = { ...realSigner, sign: (claims: Parameters<typeof realSigner.sign>[0]) => isIssuerUnavailable() ? Promise.reject(new IssuerUnavailable()) : realSigner.sign(claims) };
   const app = createService({ identity, fleet, secrets, signer, now, config: {
     origin, cookieDomain: 'example.test', ...(trustedProxy === undefined ? {} : { trustedProxy }), clients: [client, gatewayClient], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });

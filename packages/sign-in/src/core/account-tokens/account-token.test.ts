@@ -8,6 +8,26 @@ import { createAccountToken } from './account-token.js';
 import { unavailable } from '../../../test/support/cleanup-outcomes.js';
 
 describe('a fresh fleet token for Maya', () => {
+  it.each(['shared sign-in', 'identity', 'reconciliation', 'signing'])('surfaces an unexpected %s error instead of reporting unavailable', async (boundary) => {
+    // Given a live shared sign-in and a programming error at a dependency boundary.
+    const fixture = await signInOfMaya();
+    const shared = await fixture.authenticate();
+    const failure = new TypeError('Unexpected defect');
+    const reject = () => Promise.reject(failure);
+    const token = createAccountToken({ ...fixture, now: () => fixture.now, issuer: 'https://signin.example.test',
+      ...(boundary === 'shared sign-in' ? { signIn: { account: reject } } : {}),
+      ...(boundary === 'identity' ? { identity: { transaction: reject } } : {}),
+      ...(boundary === 'reconciliation' ? { fleet: { reconcile: reject } } : {}),
+      signer: { sign: boundary === 'signing' ? reject : () => Promise.resolve('token') },
+    });
+
+    // When the shared sign-in is exchanged for a fleet token.
+    const exchange = token({ signIn: shared.signIn, fleetId: aSetup().input.fleetId });
+
+    // Then the original error reaches the caller.
+    await expect(exchange).rejects.toBe(failure);
+  });
+
   it('refuses a new credential sign-in after disable and prevents an in-flight exchange restoring removed rights', async () => {
     // Given an exchange paused at core while Maya still has rights.
     const fixture = await signInOfMaya();

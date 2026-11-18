@@ -12,16 +12,14 @@ export interface SetupInput {
 }
 
 export function createSetup(deps: { identity: Identity; fleet: PersonFleets; secrets: Secrets }) {
-  /** Provisioning failures leave the saved identity pending; a failure to save it is a system failure and propagates. */
+  /** Expected provisioning refusals leave the saved identity pending; unexpected failures propagate. */
   async function provision(input: { accountId: AccountId; fleetId: FleetId }) {
     return deps.identity.transaction(async (records) => {
       const account = await records.accountById(input.accountId);
       const held = await records.right(input);
       if (account === null || account.isDisabled || !held?.isFleetManager) return { kind: 'pending' as const, reason: 'accessRemoved' as const };
-      let reconciled;
-      try { reconciled = await deps.fleet.reconcile(input); }
-      catch { return { kind: 'pending' as const, reason: 'unavailable' as const }; }
-      if (reconciled.kind === 'installationRefused') return { kind: 'pending' as const, reason: 'installationRefused' as const };
+      const reconciled = await deps.fleet.reconcile(input);
+      if (reconciled.kind !== 'reconciled') return { kind: 'pending' as const, reason: reconciled.kind };
       const { right } = reconciled;
       await records.saveRight(right);
       return { kind: 'ready' as const, accountId: input.accountId, personShipId: right.personShipId };
