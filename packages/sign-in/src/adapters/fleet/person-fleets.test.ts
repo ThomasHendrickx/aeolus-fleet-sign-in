@@ -22,6 +22,21 @@ describe('person provisioning failure boundaries', () => {
     } finally { await server.close(); }
   });
 
+  it('reports core redirects as unavailable without following them', async () => {
+    // Given core redirects an installation request to a working endpoint.
+    const server = Fastify();
+    server.get('/trpc/installation.fleets.get', (_request, reply) => reply.redirect('/redirected'));
+    server.get('/redirected', () => ({ result: { data: {} } }));
+    const url = await server.listen({ host: '127.0.0.1', port: 0 });
+    try {
+      // When provisioning calls core.
+      const result = await createPersonFleets({ url, installationToken: 'fixture' }).reconcile(input);
+
+      // Then the redirect is a retryable outage, without parsing the destination.
+      expect(result).toEqual({ kind: 'unavailable' });
+    } finally { await server.close(); }
+  });
+
   it.each(['disconnect', 'timeout'])('reports unavailable after a network %s', async (failure) => {
     // Given core disconnects or never answers the request.
     const server = Fastify();
