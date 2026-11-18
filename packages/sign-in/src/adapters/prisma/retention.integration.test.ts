@@ -3,7 +3,9 @@ import { generateKeyPairSync } from 'node:crypto';
 
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+
+import type { Identity } from '../../core/shared/identity.js';
 
 import { createService } from '../../app.js';
 import { createSecrets } from '../crypto/secrets.js';
@@ -47,6 +49,67 @@ it('deletes expired sign-in records at startup and on repeated purges while pres
     // Then all expired records are physically deleted, including on an idempotent retry.
     expect(await keys()).toEqual([]);
   } finally { await app.server.close(); }
+});
+
+it('purges each hour, retries after failure, and stops when the service closes', async () => {
+  // Given a running service backed by Postgres and a purge that can fail once.
+  let shouldFail = false;
+  let completed: (() => void) | undefined;
+  const identity: Identity = {
+    async transaction(work) {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error('database unavailable');
+      }
+      const result = await database.identity.transaction(work);
+      completed?.();
+      return result;
+    },
+  };
+  const { app, clock } = service(identity);
+  const hour = 3_600_000;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await app.server.ready();
+    const saveExpired = async (hash: string) => database.identity.transaction((records) => records.saveCode({ hash, code: { clientId: 'console', redirectUri, codeChallenge: 'challenge', signInHash: 'shared', expiresAt: 0 } }));
+    const nextPurge = () => new Promise<void>((resolve) => { completed = resolve; });
+
+    // When each hour passes, including an hour whose purge fails.
+    await saveExpired('first-hour');
+    clock.now = hour;
+    let purged = nextPurge();
+    await vi.advanceTimersByTimeAsync(hour);
+    await purged;
+    expect(await keys()).not.toContain('code/first-hour');
+
+    await saveExpired('second-hour');
+    clock.now = 2 * hour;
+    purged = nextPurge();
+    await vi.advanceTimersByTimeAsync(hour);
+    await purged;
+    expect(await keys()).not.toContain('code/second-hour');
+
+    await saveExpired('after-failure');
+    shouldFail = true;
+    clock.now = 3 * hour;
+    await vi.advanceTimersByTimeAsync(hour);
+    expect(await keys()).toContain('code/after-failure');
+    clock.now = 4 * hour;
+    purged = nextPurge();
+    await vi.advanceTimersByTimeAsync(hour);
+    await purged;
+    expect(await keys()).not.toContain('code/after-failure');
+
+    // Then closing cancels the next purge.
+    await app.server.close();
+    await saveExpired('after-close');
+    await vi.advanceTimersByTimeAsync(hour);
+    expect(await keys()).toContain('code/after-close');
+    await pool.query("DELETE FROM identity_records WHERE key = 'code/after-close'");
+  } finally {
+    await app.server.close();
+    vi.useRealTimers();
+  }
 });
 
 it('stores no row for an anonymous visit and completes only a submitted browser-bound flow once', async () => {
@@ -97,9 +160,9 @@ it('stores no row for an anonymous visit and completes only a submitted browser-
 const origin = 'https://signin.example.test';
 const redirectUri = 'https://console.example.test/sign-in/done';
 const { privateKey } = generateKeyPairSync('ed25519');
-function service() {
+function service(identity: Identity = database.identity) {
   const clock = { now: 0 };
-  const app = createService({ identity: database.identity, fleet: fleetOfMaya(), now: () => clock.now, secrets: createSecrets(), signer: createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] }), config: {
+  const app = createService({ identity, fleet: fleetOfMaya(), now: () => clock.now, secrets: createSecrets(), signer: createSigner({ activeKeyId: 'first', keys: [{ id: 'first', privateKey }] }), config: {
     origin, cookieDomain: 'example.test', clients: [{ id: 'console', secret: 'fixture-secret', redirectUri }], fleets: [{ id: aSetup().input.fleetId, name: 'workshop', consoleUrl: 'https://console.example.test', gatewayUrl: 'https://bridge.example.test' }],
   } });
   return { app, clock };
