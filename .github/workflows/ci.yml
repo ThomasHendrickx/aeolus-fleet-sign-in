@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 26
           cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
@@ -73,7 +73,7 @@ jobs:
         with:
           node-version: 26
           cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install
       - run: npm test -- --project sign-in:integration --reporter verbose
       - run: npm run build
 
@@ -86,7 +86,7 @@ jobs:
         with:
           node-version: 26
           cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install
       - run: npm exec playwright install --with-deps chromium
       - run: npm test -- --project sign-in:browser --reporter verbose
 
