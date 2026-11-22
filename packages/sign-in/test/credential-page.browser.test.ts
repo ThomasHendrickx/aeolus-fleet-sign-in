@@ -164,7 +164,8 @@ describe('approved credential screens', () => {
       }
 
       // Then the notice is the approved one, and the paused button looks disabled.
-      expect(noticeIn(await page.getByRole('alert').evaluate((notice) => notice.outerHTML))).toBe(approvedNotice(scene));
+      // The previous submission's alert may still show, so retry until the last response's notice replaces it.
+      await expect.poll(async () => noticeIn(await page.getByRole('alert').evaluate((notice) => notice.outerHTML))).toBe(approvedNotice(scene));
       if (scene === '05-too-many-attempts') {
         expect(await page.getByTestId('sign-in-submit').isDisabled()).toBe(true);
         await expect.poll(() => page.getByTestId('sign-in-submit').evaluate((button) => getComputedStyle(button).opacity)).toBe('0.45');
