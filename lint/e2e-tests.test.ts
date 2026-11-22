@@ -9,11 +9,12 @@ import { createLint, reportsOf } from './support/lint-probe.ts';
 const probes = {
   browser: 'packages/sign-in/test/rules-probe.browser.test.ts',
   e2e: 'packages/sign-in/test/e2e/rules-probe.ts',
+  e2eNamed: 'packages/sign-in/test/rules-probe.e2e.test.ts',
   unit: 'packages/sign-in/src/core/accounts/rules-probe.test.ts',
 };
 const lint = createLint({ tsconfig: 'tsconfig.json', probes: Object.values(probes) });
 
-const inBrowserTests = [probes.browser, probes.e2e];
+const inBrowserTests = [probes.browser, probes.e2e, probes.e2eNamed];
 
 const probeOf = (statement: string) => `export async function probe(page: { getByTestId(id: string): unknown; waitForTimeout(ms: number): Promise<void>; waitForLoadState(state: string): Promise<void>; locator(selector: string): unknown }) {
   ${statement}
