@@ -261,7 +261,7 @@ export default defineConfig(
   {
     // Repeats the Prisma list: this block's import rules replace the all-files ones for its files.
     name: 'aeolus/browser-tests-wait-on-the-app',
-    files: ['**/*.browser.test.ts', '**/e2e/**/*.ts'],
+    files: ['**/*.browser.test.ts', '**/*.e2e.test.ts', '**/e2e/**/*.ts'],
     rules: importRules({ patterns: prismaOutsideItsAdapter, syntax: browserTestWaits }),
   },
 );
