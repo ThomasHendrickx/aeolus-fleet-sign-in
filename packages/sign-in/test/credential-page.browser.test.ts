@@ -164,7 +164,7 @@ describe('approved credential screens', () => {
       }
 
       // Then the notice is the approved one, and the paused button looks disabled.
-      expect(noticeIn(await page.locator('[data-feedback]').innerHTML())).toBe(approvedNotice(scene));
+      expect(noticeIn(await page.getByRole('alert').evaluate((notice) => notice.outerHTML))).toBe(approvedNotice(scene));
       if (scene === '05-too-many-attempts') {
         expect(await page.getByTestId('sign-in-submit').isDisabled()).toBe(true);
         await expect.poll(() => page.getByTestId('sign-in-submit').evaluate((button) => getComputedStyle(button).opacity)).toBe('0.45');

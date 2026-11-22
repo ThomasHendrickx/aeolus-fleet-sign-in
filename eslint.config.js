@@ -140,8 +140,26 @@ function importRules({ patterns, syntax = [] }) {
   };
 }
 
+const waitMessage = 'Browser tests wait on what the app does: a retrying assertion, a known response or the part\'s data-state (behaviour-driven-development skill).';
+
+/**
+ * Playwright runs as a library under Vitest here, not as the Playwright test
+ * runner, so eslint-plugin-playwright does not apply: these are plain syntax rules.
+ * @type {SyntaxRestriction[]}
+ */
+const browserTestWaits = [
+  { selector: 'CallExpression[callee.property.name="waitForTimeout"]', message: `No fixed sleep. ${waitMessage}` },
+  { selector: 'CallExpression[callee.name="setTimeout"]', message: `No fixed sleep. ${waitMessage}` },
+  { selector: 'CallExpression[callee.object.name=/^(window|globalThis)$/][callee.property.name="setTimeout"]', message: `No fixed sleep. ${waitMessage}` },
+  { selector: 'Literal[value="networkidle"]', message: `No networkidle. ${waitMessage}` },
+  {
+    selector: 'CallExpression[callee.property.name="locator"]',
+    message: 'No raw locator: use getByTestId, getByRole or getByText (web-frontend skill).',
+  },
+];
+
 export default defineConfig(
-  globalIgnores(['**/node_modules/', '**/dist/', '**/coverage/', 'packages/sign-in/src/adapters/prisma/generated/']),
+  globalIgnores(['.agents/', '.claude/', '**/node_modules/', '**/dist/', '**/coverage/', 'packages/sign-in/src/adapters/prisma/generated/']),
 
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
@@ -238,5 +256,12 @@ export default defineConfig(
       'no-restricted-properties': ['error', ...noModuleMocks, ...noTestDoubles, ...coreImpure.properties],
       'no-restricted-globals': ['error', ...coreImpure.globals],
     },
+  },
+
+  {
+    // Repeats the Prisma list: this block's import rules replace the all-files ones for its files.
+    name: 'aeolus/browser-tests-wait-on-the-app',
+    files: ['**/*.browser.test.ts', '**/e2e/**/*.ts'],
+    rules: importRules({ patterns: prismaOutsideItsAdapter, syntax: browserTestWaits }),
   },
 );
