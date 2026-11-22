@@ -159,7 +159,7 @@ const browserTestWaits = [
 ];
 
 export default defineConfig(
-  globalIgnores(['.agents/', '.claude/', '**/node_modules/', '**/dist/', '**/coverage/', 'packages/sign-in/src/adapters/prisma/generated/']),
+  globalIgnores(['**/node_modules/', '**/dist/', '**/coverage/', 'packages/sign-in/src/adapters/prisma/generated/']),
 
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
